@@ -843,7 +843,7 @@ export default function App() {
                   </div>
 
                   <button 
-                    onClick={() => openWallet()}
+                    onClick={() => window.open('https://wallet.particle.network', '_blank')}
                     className="p-6 bg-slate-800/30 hover:bg-slate-800/50 rounded-2xl flex items-center justify-between group transition-all"
                   >
                     <div className="text-left">
