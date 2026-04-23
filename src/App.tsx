@@ -176,7 +176,7 @@ export default function App() {
           setUserProfile({ ...data, name: data.name || fallbackName, email: data.email || userInfo.email });
         }
       } else if (error && error.code === 'PGRST116') {
-        const initialBalance = walletBalance > 0 ? walletBalance : 1000.00;
+        const initialBalance = walletBalance;
         const { data: newData, error: insertError } = await supabase
           .from('profiles')
           .insert([{ 

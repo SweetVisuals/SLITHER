@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS public.profiles (
   id uuid PRIMARY KEY,
   email text,
-  balance numeric DEFAULT 1000.00,
+  balance numeric DEFAULT 0.00,
   high_score integer DEFAULT 0,
   total_injected numeric DEFAULT 0,
   total_sessions integer DEFAULT 0,
