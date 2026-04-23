@@ -1,0 +1,6 @@
+{
+  "name": "Slider.io",
+  "description": "A 2D multiplayer-style snake game where you eat food to grow and avoid other snakes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
