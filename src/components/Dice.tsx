@@ -52,17 +52,8 @@ export default function Dice({ balance, onBalanceChange, onExit }: GameProps) {
 
   return (
     <div className="flex flex-col items-center justify-center w-full h-full bg-slate-900 text-slate-50 relative p-8">
-       <div className="absolute top-4 left-4">
-          <button onClick={onExit} className="px-4 py-2 bg-slate-800 text-sky-400 font-bold border border-sky-500/50 hover:bg-slate-700">
-             BACK TO MENU
-          </button>
-       </div>
-       <div className="absolute top-4 right-4 flex flex-col items-end pointer-events-none">
-          <span className="text-sky-500/60 font-mono text-xs uppercase">CREDITS</span>
-          <span className="text-2xl font-bold font-mono text-white">${balance.toFixed(2)}</span>
-       </div>
 
-       <div className="flex flex-col gap-12 w-full max-w-2xl bg-slate-800/20 p-8 border border-sky-500/10 rounded-xl">
+       <div className="flex flex-col gap-12 w-full max-w-2xl bg-slate-800/20 p-8 rounded-3xl shadow-2xl animate-in fade-in zoom-in duration-500">
          <h2 className="text-3xl font-black italic text-sky-400 font-mono tracking-tighter text-center">DICE</h2>
          
          {/* Results Area */}
@@ -97,25 +88,25 @@ export default function Dice({ balance, onBalanceChange, onExit }: GameProps) {
                     type="number"
                     value={betAmount}
                     onChange={(e) => setBetAmount(Math.max(1, parseFloat(e.target.value) || 1))}
-                    className="bg-slate-800 border border-sky-500/30 p-3 font-mono text-lg text-white"
+                    className="bg-slate-800 p-3 font-mono text-lg text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/50"
                   />
                </div>
                <div className="flex flex-col gap-2 flex-1">
                   <label className="text-sm font-mono text-slate-400 uppercase">Payout Mult</label>
-                  <div className="bg-slate-800/50 border border-sky-500/20 p-3 font-mono text-lg text-sky-400">
+                  <div className="bg-slate-800/50 p-3 font-mono text-lg text-sky-400 rounded-xl">
                       {multiplier.toFixed(2)}x
                   </div>
                </div>
                <div className="flex gap-2">
                  <button 
                    onClick={() => setRollMode('UNDER')}
-                   className={`px-4 py-3 font-bold uppercase transition-colors border ${rollMode === 'UNDER' ? 'bg-sky-500 text-slate-900 border-sky-500' : 'bg-slate-800 text-slate-500 hover:border-sky-500/50 border-slate-700'}`}
+                   className={`px-4 py-3 font-bold uppercase transition-all rounded-xl shadow-lg ${rollMode === 'UNDER' ? 'bg-sky-500 text-slate-900 shadow-sky-500/20' : 'bg-slate-800 text-slate-500 hover:bg-slate-700'}`}
                  >
                    Under
                  </button>
                  <button 
                    onClick={() => setRollMode('OVER')}
-                   className={`px-4 py-3 font-bold uppercase transition-colors border ${rollMode === 'OVER' ? 'bg-sky-500 text-slate-900 border-sky-500' : 'bg-slate-800 text-slate-500 hover:border-sky-500/50 border-slate-700'}`}
+                   className={`px-4 py-3 font-bold uppercase transition-all rounded-xl shadow-lg ${rollMode === 'OVER' ? 'bg-sky-500 text-slate-900 shadow-sky-500/20' : 'bg-slate-800 text-slate-500 hover:bg-slate-700'}`}
                  >
                    Over
                  </button>
@@ -125,7 +116,7 @@ export default function Dice({ balance, onBalanceChange, onExit }: GameProps) {
             <button 
                 onClick={rollDice}
                 disabled={balance < betAmount}
-                className={`w-full py-5 text-xl font-bold uppercase ${balance >= betAmount ? 'bg-sky-500 hover:bg-sky-400 text-slate-900' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}
+                className={`w-full py-5 text-xl font-bold uppercase rounded-2xl shadow-lg transition-all ${balance >= betAmount ? 'bg-sky-500 hover:bg-sky-400 text-slate-900 shadow-sky-500/20' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
             >
                 Roll Dice
             </button>

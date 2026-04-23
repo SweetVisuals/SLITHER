@@ -106,15 +106,6 @@ export default function Mines({ balance, onBalanceChange, onExit }: GameProps) {
 
   return (
     <div className="flex flex-col items-center justify-center w-full h-full bg-slate-900 text-slate-50 relative p-8">
-       <div className="absolute top-4 left-4">
-          <button onClick={onExit} className="px-4 py-2 bg-slate-800 text-sky-400 font-bold border border-sky-500/50 hover:bg-slate-700">
-             BACK TO MENU
-          </button>
-       </div>
-       <div className="absolute top-4 right-4 flex flex-col items-end pointer-events-none">
-          <span className="text-sky-500/60 font-mono text-xs uppercase">CREDITS</span>
-          <span className="text-2xl font-bold font-mono text-white">${balance.toFixed(2)}</span>
-       </div>
 
        <div className="flex flex-col md:flex-row gap-12 w-full max-w-4xl">
          {/* Controls Sidebar */}
@@ -128,7 +119,7 @@ export default function Mines({ balance, onBalanceChange, onExit }: GameProps) {
                  disabled={gameState === 'PLAYING'}
                  value={betAmount}
                  onChange={(e) => setBetAmount(Math.max(1, parseFloat(e.target.value) || 1))}
-                 className="bg-slate-800 border border-sky-500/30 p-3 font-mono text-lg text-white"
+                 className="bg-slate-800 p-3 font-mono text-lg text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/50"
               />
             </div>
 
@@ -138,7 +129,7 @@ export default function Mines({ balance, onBalanceChange, onExit }: GameProps) {
                  disabled={gameState === 'PLAYING'}
                  value={minesCount}
                  onChange={(e) => setMinesCount(parseInt(e.target.value))}
-                 className="bg-slate-800 border border-sky-500/30 p-3 font-mono text-lg text-white"
+                 className="bg-slate-800 p-3 font-mono text-lg text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/50"
               >
                   {[...Array(24)].map((_, i) => (
                     <option key={i+1} value={i+1}>{i+1}</option>
@@ -150,7 +141,7 @@ export default function Mines({ balance, onBalanceChange, onExit }: GameProps) {
                 <button 
                    onClick={startGame}
                    disabled={balance < betAmount}
-                   className={`py-4 font-bold uppercase ${balance >= betAmount ? 'bg-sky-500 hover:bg-sky-400 text-slate-900' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}
+                   className={`py-4 font-bold uppercase rounded-xl shadow-lg transition-all ${balance >= betAmount ? 'bg-sky-500 hover:bg-sky-400 text-slate-900 shadow-sky-500/20' : 'bg-slate-800 text-slate-500'}`}
                 >
                    Place Bet
                 </button>
@@ -159,13 +150,13 @@ export default function Mines({ balance, onBalanceChange, onExit }: GameProps) {
                    <button 
                       onClick={() => handleCashout(gemsFound)}
                       disabled={gemsFound === 0}
-                      className={`flex-1 py-4 font-bold uppercase transition-colors ${gemsFound > 0 ? 'bg-green-500 hover:bg-green-400 text-slate-900 border border-green-400' : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'}`}
+                      className={`flex-1 py-4 font-bold uppercase transition-all rounded-xl shadow-lg ${gemsFound > 0 ? 'bg-green-500 hover:bg-green-400 text-slate-900 shadow-green-500/20' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
                    >
                       Cashout (${(betAmount * currentMult).toFixed(2)})
                    </button>
                    <button 
                       onClick={handleAutoSelect}
-                      className="py-4 px-4 font-bold uppercase bg-slate-800 text-sky-400 border border-sky-500/50 hover:bg-slate-700"
+                      className="py-4 px-6 font-bold uppercase bg-slate-800 text-sky-400 rounded-xl hover:bg-slate-700 transition-all shadow-lg"
                    >
                       Auto
                    </button>
@@ -173,7 +164,7 @@ export default function Mines({ balance, onBalanceChange, onExit }: GameProps) {
             )}
 
             {gameState === 'PLAYING' && (
-                <div className="p-4 bg-slate-800/50 border border-sky-500/20 mt-4 rounded flex flex-col items-center">
+                <div className="p-6 bg-slate-800/50 mt-4 rounded-2xl flex flex-col items-center shadow-xl">
                     <span className="text-xs uppercase text-slate-500 mb-2 font-mono">Next Tile Multiplier</span>
                     <span className="text-3xl font-black text-sky-400">{nextMultiplier}x</span>
                 </div>
@@ -186,7 +177,7 @@ export default function Mines({ balance, onBalanceChange, onExit }: GameProps) {
             {gameState === 'LOST' && <div className="text-red-500 text-2xl font-black mb-4 font-mono animate-pulse">MINED</div>}
             {gameState === 'IDLE' && <div className="text-sky-500/50 text-xl font-bold mb-4 font-mono">WAITING TO START</div>}
 
-            <div className="grid grid-cols-5 gap-3 w-full max-w-sm aspect-square bg-slate-800/20 p-4 border border-sky-500/10 rounded-xl">
+            <div className="grid grid-cols-5 gap-3 w-full max-w-sm aspect-square bg-slate-800/20 p-4 rounded-3xl shadow-2xl">
                {(grid.length > 0 ? grid : Array(GRID_SIZE).fill({ revealed: false })).map((cell, idx) => (
                   <button 
                      key={idx}
@@ -196,8 +187,8 @@ export default function Mines({ balance, onBalanceChange, onExit }: GameProps) {
                         w-full h-full aspect-square rounded-md transition-all duration-300 relative overflow-hidden
                         flex items-center justify-center
                         ${cell.revealed ? 
-                            (cell.isMine ? 'bg-red-500/20 border-red-500/50 block scale-95' : 'bg-slate-800/80 border-sky-500/30 scale-95') 
-                            : 'bg-slate-700/80 hover:bg-slate-600 border-t border-slate-600 shadow-md shadow-black/50 hover:-translate-y-1'
+                            (cell.isMine ? 'bg-red-500/20 scale-95' : 'bg-slate-800/80 scale-95 shadow-inner') 
+                            : 'bg-slate-700/80 hover:bg-slate-600 shadow-xl shadow-black/50 hover:-translate-y-1'
                         }
                      `}
                   >

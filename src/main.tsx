@@ -2,14 +2,8 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import { AuthCoreContextProvider } from '@particle-network/auth-core-modal';
 import { walletEntryPlugin } from '@particle-network/wallet';
-import { Buffer } from 'buffer';
 import App from './App.tsx';
 import './index.css';
-
-window.Buffer = window.Buffer || Buffer;
-if (typeof window !== 'undefined') {
-  window.process = window.process || { env: {} } as any;
-}
 
 walletEntryPlugin.init(
   {
@@ -35,8 +29,20 @@ createRoot(document.getElementById('root')!).render(
         projectId: '3a913b51-6884-4638-bd23-fa0d728c7975',
         clientKey: 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
         appId: '8c38a8da-9800-4764-9007-76d512c5163e',
+        erc4337: {
+          name: 'SIMPLE',
+          version: '1.0.0',
+        },
+        chainConfig: {
+          name: 'BSC',
+          id: 56,
+        },
         wallet: {
-          visible: false
+          visible: false,
+          themeType: 'dark',
+          customStyle: {
+            primaryColor: '#0ea5e9',
+          }
         }
       }}
     >

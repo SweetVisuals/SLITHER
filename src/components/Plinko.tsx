@@ -226,15 +226,6 @@ export default function Plinko({ balance, onBalanceChange, onExit }: GameProps) 
 
   return (
     <div className="flex flex-col items-center justify-center w-full h-full bg-slate-900 text-slate-50 relative">
-       <div className="absolute top-4 left-4">
-          <button onClick={onExit} className="px-4 py-2 bg-slate-800 text-sky-400 font-bold border border-sky-500/50 hover:bg-slate-700">
-             BACK TO MENU
-          </button>
-       </div>
-       <div className="absolute top-4 right-4 flex flex-col items-end pointer-events-none">
-          <span className="text-sky-500/60 font-mono text-xs uppercase">CREDITS</span>
-          <span className="text-2xl font-bold font-mono text-white">${balance.toFixed(2)}</span>
-       </div>
        
        <div className="mb-4 flex items-center gap-4 z-10">
           <div className="flex flex-col">
@@ -243,26 +234,26 @@ export default function Plinko({ balance, onBalanceChange, onExit }: GameProps) 
               type="number" 
               value={betAmount} 
               onChange={e => setBetAmount(Math.max(1, parseFloat(e.target.value) || 1))}
-              className="bg-slate-800 border border-sky-500/50 text-white p-2 w-32 font-mono"
+              className="bg-slate-800 text-white p-3 w-32 font-mono rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/50"
             />
           </div>
           <button 
              onClick={dropBall}
              disabled={balance < betAmount}
-             className={`mt-4 px-8 py-3 font-bold uppercase transition-colors border ${
+             className={`mt-4 px-8 py-3 font-bold uppercase transition-all rounded-xl shadow-lg ${
                 balance >= betAmount 
-                  ? 'bg-sky-500 text-slate-900 border-sky-500 hover:bg-sky-400' 
-                  : 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+                  ? 'bg-sky-500 text-slate-900 hover:bg-sky-400 shadow-sky-500/20' 
+                  : 'bg-slate-800 text-slate-500 cursor-not-allowed'
               }`}
           >
              Drop Ball (-${betAmount})
           </button>
        </div>
 
-       <div className="relative" style={{ width: dimensions.width, height: dimensions.height }}>
+       <div className="relative overflow-hidden rounded-3xl shadow-2xl" style={{ width: dimensions.width, height: dimensions.height }}>
           <canvas 
             ref={canvasRef} 
-            className="border border-sky-500/30 rounded"
+            className="rounded-3xl"
           />
        </div>
     </div>

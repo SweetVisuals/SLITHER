@@ -77,15 +77,6 @@ export default function Crash({ balance, onBalanceChange, onExit }: GameProps) {
 
   return (
     <div className="flex flex-col items-center justify-center w-full h-full bg-slate-900 text-slate-50 relative p-8">
-       <div className="absolute top-4 left-4">
-          <button onClick={onExit} className="px-4 py-2 bg-slate-800 text-sky-400 font-bold border border-sky-500/50 hover:bg-slate-700">
-             BACK TO MENU
-          </button>
-       </div>
-       <div className="absolute top-4 right-4 flex flex-col items-end pointer-events-none">
-          <span className="text-sky-500/60 font-mono text-xs uppercase">CREDITS</span>
-          <span className="text-2xl font-bold font-mono text-white">${balance.toFixed(2)}</span>
-       </div>
 
        <div className="flex flex-col md:flex-row gap-12 w-full max-w-4xl">
          {/* Controls Sidebar */}
@@ -99,7 +90,7 @@ export default function Crash({ balance, onBalanceChange, onExit }: GameProps) {
                  disabled={gameState === 'PLAYING'}
                  value={betAmount}
                  onChange={(e) => setBetAmount(Math.max(1, parseFloat(e.target.value) || 1))}
-                 className="bg-slate-800 border border-sky-500/30 p-3 font-mono text-lg text-white"
+                 className="bg-slate-800 p-3 font-mono text-lg text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/50"
               />
             </div>
 
@@ -114,7 +105,7 @@ export default function Crash({ balance, onBalanceChange, onExit }: GameProps) {
                  disabled={gameState === 'PLAYING'}
                  value={autoCashout}
                  onChange={(e) => setAutoCashout(Math.max(0, parseFloat(e.target.value) || 0))}
-                 className="bg-slate-800 border border-sky-500/30 p-3 font-mono text-lg text-white"
+                 className="bg-slate-800 p-3 font-mono text-lg text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/50"
               />
             </div>
 
@@ -122,14 +113,14 @@ export default function Crash({ balance, onBalanceChange, onExit }: GameProps) {
                 <button 
                    onClick={startGame}
                    disabled={balance < betAmount}
-                   className={`py-4 font-bold uppercase ${balance >= betAmount ? 'bg-sky-500 hover:bg-sky-400 text-slate-900' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}
+                   className={`py-4 font-bold uppercase rounded-xl transition-all shadow-lg ${balance >= betAmount ? 'bg-sky-500 hover:bg-sky-400 text-slate-900 shadow-sky-500/20' : 'bg-slate-800 text-slate-500'}`}
                 >
                    Place Bet
                 </button>
             ) : (
                 <button 
                    onClick={handleManualCashout}
-                   className="py-4 font-bold uppercase transition-colors bg-green-500 hover:bg-green-400 text-slate-900 border border-green-400"
+                   className="py-4 font-bold uppercase transition-all bg-green-500 hover:bg-green-400 text-slate-900 rounded-xl shadow-lg shadow-green-500/20"
                 >
                    Cashout (${(betAmount * currentMultiplier).toFixed(2)})
                 </button>
@@ -137,7 +128,7 @@ export default function Crash({ balance, onBalanceChange, onExit }: GameProps) {
          </div>
 
          {/* Chart Area */}
-         <div className="flex-1 flex flex-col items-center justify-center border border-sky-500/20 bg-slate-800/20 relative rounded-xl h-96 overflow-hidden">
+         <div className="flex-1 flex flex-col items-center justify-center bg-slate-800/20 relative rounded-3xl h-96 overflow-hidden shadow-2xl animate-in fade-in slide-in-from-right-4 duration-700">
              
              {/* Dynamic Multiplier */}
              <div className={`text-6xl font-black font-mono z-10 
