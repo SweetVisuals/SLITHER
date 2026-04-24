@@ -200,25 +200,57 @@ Deno.serve(async (req) => {
         await supabaseClient.from('drops').insert(drops);
       }
 
-      // 4. THE MAGIC: Automatic On-Chain Payout
+      // 4. THE MAGIC: Automatic Smart Account Payout (Gasless/USDC-Gas)
       let txHash = null;
       if (playerPayout > 0 && profile.wallet_address) {
         try {
           const { ethers } = await import("https://esm.sh/ethers@6.10.0");
-          const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
+          // We use the Particle/Biconomy REST API or SDK approach to send gasless transactions
+          // For this implementation, we use a Paymaster-enabled transaction
           const relayerKey = Deno.env.get('RELAYER_PRIVATE_KEY');
+          const projectId = Deno.env.get('PARTICLE_PROJECT_ID');
+          const clientKey = Deno.env.get('PARTICLE_CLIENT_KEY');
           
-          if (relayerKey) {
-            const wallet = new ethers.Wallet(relayerKey, provider);
+          if (relayerKey && projectId && clientKey) {
+            // Encode the USDC transfer
             const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-            const usdcAbi = ["function transfer(address to, uint256 amount) public returns (bool)"];
-            const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, wallet);
+            const amountHex = "0x" + Math.floor(playerPayout * 10**6).toString(16);
             
-            // Convert to 6 decimals
-            const amount = ethers.parseUnits(playerPayout.toFixed(6), 6);
-            const tx = await usdcContract.transfer(profile.wallet_address, amount);
-            txHash = tx.hash;
-            console.log(`Automatic payout sent: ${txHash} for ${playerPayout} USDC`);
+            // Minimal ERC20 Transfer Data: 0xa9059cbb + address(32) + amount(32)
+            const data = "0xa9059cbb" + 
+                         profile.wallet_address.replace("0x", "").padStart(64, "0") + 
+                         amountHex.replace("0x", "").padStart(64, "0");
+
+            // Call Particle's Smart Account API to execute gasless
+            const response = await fetch(`https://api.particle.network/server/rpc?chainId=42161&projectUuid=${projectId}&projectKey=${clientKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "particle_aa_sendUserOperation",
+                params: [{
+                  name: "BICONOMY",
+                  version: "2.0.0",
+                  owner: new ethers.Wallet(relayerKey).address // This identifies the EOA owner
+                }, {
+                  tx: {
+                    to: usdcAddress,
+                    value: "0x0",
+                    data: data
+                  },
+                  feeQuote: "native" // The Paymaster will handle the conversion or sponsorship
+                }]
+              })
+            });
+
+            const res = await response.json();
+            if (res.result && res.result.userOpHash) {
+               txHash = res.result.userOpHash;
+               console.log(`Smart Payout initiated: ${txHash}`);
+            } else {
+               console.error('Particle AA Error:', res.error);
+            }
           }
         } catch ( payoutErr ) {
           console.error('Relayer Payout Failed:', payoutErr);
