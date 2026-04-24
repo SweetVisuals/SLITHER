@@ -269,11 +269,11 @@ export default function App() {
 
   const startGame = async () => {
     if (selectedGame === 'SLITHER') {
-       if (!isTestMode && balance < 0.05) {
+       if (!isTestMode && balance < 0.10) {
          setConfirmModal({
            show: true,
            title: 'Insufficient Credits',
-           message: '$0.05 Entry Fee required. Please top up your balance to continue.',
+           message: '$0.10 Entry Fee required. Please top up your balance to continue.',
            onConfirm: () => setIsDepositWizardOpen(true)
          });
          return;
@@ -305,7 +305,7 @@ export default function App() {
           setTotalSessions(prev => prev + 1);
           setScore(0);
           setCurrentPage('PLAYING');
-          if (!isTestMode) notify('Session Started: -$0.05', 'info');
+          if (!isTestMode) notify('Session Started: -$0.10', 'info');
           else notify('Test Session Started (Free)', 'info');
         } catch (err: any) {
           console.error('Start game error:', err);
@@ -689,7 +689,7 @@ export default function App() {
                           <span className="text-sky-400 font-mono text-xs uppercase font-bold tracking-[0.2em]">Live Protocol</span>
                        </div>
                        <div className="px-4 py-1.5 bg-yellow-500/20 rounded-full backdrop-blur-md">
-                          <span className="text-yellow-400 font-mono text-xs uppercase font-bold tracking-[0.2em]">$0.05 ENTRY</span>
+                          <span className="text-yellow-400 font-mono text-xs uppercase font-bold tracking-[0.2em]">$0.10 ENTRY</span>
                        </div>
                     </div>
                     
@@ -1072,7 +1072,7 @@ export default function App() {
                   <div className="p-8 space-y-4">
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-400">Session Wager</span>
-                      <span className="text-white font-mono">$0.05</span>
+                      <span className="text-white font-mono">$0.10</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-400">Collected Earnings</span>
@@ -1092,8 +1092,8 @@ export default function App() {
                     </div>
                     <div className="pt-4 flex justify-between items-baseline">
                       <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Net Session Profit</span>
-                      <span className={`text-2xl font-black italic ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.05) >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>
-                        ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.05).toFixed(2)}
+                      <span className={`text-2xl font-black italic ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.10) >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>
+                        ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.10).toFixed(2)}
                       </span>
                     </div>
                   </div>

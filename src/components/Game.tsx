@@ -296,8 +296,8 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       if (snake.dead) return;
       snake.dead = true;
       
-      // Economic Calculation based on ECONOMICS.md
-      // Total Drop Value = Base $0.05 + (50% of the dead snake's collectedMoney)
+      // Economic Calculation based on user request
+      // Total Drop Value = (50% of Entry Fee: $0.05) + (50% of the dead snake's collectedMoney)
       const totalWealth = 0.05 + (snake.collectedMoney * 0.5);
       // Applying 5% House Rake
       const lootToDrop = totalWealth * 0.95;

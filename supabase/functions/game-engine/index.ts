@@ -50,9 +50,9 @@ Deno.serve(async (req) => {
       if (fetchError || !profile) throw new Error('Profile not found');
       
       const isTest = payload.isTest || false;
-      if (!isTest && profile.balance < 0.01) throw new Error('Insufficient balance');
+      if (!isTest && profile.balance < 0.10) throw new Error('Insufficient balance');
 
-      const newBalance = isTest ? profile.balance : profile.balance - 0.01;
+      const newBalance = isTest ? profile.balance : profile.balance - 0.10;
 
       // 2. Update balance and create session
       const { error: updateError } = await supabaseClient
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
         .from('sessions')
         .insert([{
           user_id: userId,
-          buy_in: isTest ? 0 : 0.01,
+          buy_in: isTest ? 0 : 0.10,
           status: 'active',
           metadata: { isTest }
         }])
@@ -159,8 +159,9 @@ Deno.serve(async (req) => {
       const penalty = earnings * 0.5;
       const newBalance = Math.max(0, (Number(profile.balance) || 0) - penalty);
       
-      const houseRake = penalty * 0.05;
-      const totalToDrop = Math.max(0, penalty - houseRake);
+      const entryFeeDrop = 0.10 * 0.5; // 50% of the entry fee redistributed
+      const houseRake = (penalty + entryFeeDrop) * 0.05;
+      const totalToDrop = Math.max(0, (penalty + entryFeeDrop) - houseRake);
 
       // 2. Update balance and close session
       await supabaseClient
