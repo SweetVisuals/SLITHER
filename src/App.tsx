@@ -149,67 +149,76 @@ export default function App() {
   const fetchUserData = async (forcedAddress?: string) => {
     if (!userInfo?.uuid) return;
     
-    // Fetch wallet balance if available
-    let walletBalance = 0;
-    const smartAccount = userInfo.wallets?.find((w: any) => 
-      w.type?.toLowerCase().includes('smart') || 
-      w.type?.toLowerCase() === 'aa' ||
-      w.type?.toLowerCase().includes('biconomy')
-    );
-    const address = forcedAddress || userAddress || smartAccount?.public_address || userInfo.wallets?.[0]?.public_address;
-    
-    if (address && !userAddress) setUserAddress(address);
-
-    if (address) {
-      try {
-        // Shared balance fetch logic
-        const getBalance = async (targetAddr: string) => {
-          console.log(`[Diagnostic] Checking balance for: ${targetAddr}`);
-          const callData = '0x70a08231' + targetAddr.replace('0x', '').padStart(64, '0');
-          const publicRpc = 'https://arb1.arbitrum.io/rpc';
-          
-          const fetchCall = async (contract: string) => {
-            const response = await fetch(publicRpc, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: '2.0',
-                method: 'eth_call',
-                params: [{ to: contract, data: callData }, 'latest'],
-                id: 1
-              })
-            });
-            const res = await response.json();
-            return res.result;
-          };
-
-          const hexNative = await fetchCall(USDC_ADDRESS);
-          const hexBridged = await fetchCall(USDC_E_ADDRESS);
-          
-          console.log(`[Diagnostic] Address ${targetAddr} -> Native Hex: ${hexNative}, Bridged Hex: ${hexBridged}`);
-          
-          let total = 0;
-          if (hexNative && hexNative !== '0x' && hexNative.length > 10) {
-            const nativeVal = Number(BigInt(hexNative)) / 10 ** USDC_DECIMALS;
-            console.log(`[Diagnostic] Native USDC: ${nativeVal}`);
-            total += nativeVal;
-          }
-          if (hexBridged && hexBridged !== '0x' && hexBridged.length > 10) {
-            const bridgedVal = Number(BigInt(hexBridged)) / 10 ** USDC_E_DECIMALS;
-            console.log(`[Diagnostic] Bridged USDC.e: ${bridgedVal}`);
-            total += bridgedVal;
-          }
-          return total;
+    try {
+      setIsProcessing(true);
+      
+      // Shared balance fetch logic
+      const getBalance = async (targetAddr: any) => {
+        if (!targetAddr || typeof targetAddr !== 'string') {
+          console.warn('[Diagnostic] Invalid address passed to getBalance:', targetAddr);
+          return 0;
+        }
+        
+        console.log(`[Diagnostic] Checking balance for: ${targetAddr}`);
+        const callData = '0x70a08231' + targetAddr.replace('0x', '').padStart(64, '0');
+        const publicRpc = 'https://arb1.arbitrum.io/rpc';
+        
+        const fetchCall = async (contract: string) => {
+          const response = await fetch(publicRpc, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'eth_call',
+              params: [{ to: contract, data: callData }, 'latest'],
+              id: 1
+            })
+          });
+          const res = await response.json();
+          return res.result;
         };
 
-        walletBalance = await getBalance(address);
-        console.log(`[Diagnostic] Final Dashboard Balance: ${walletBalance}`);
+        const hexNative = await fetchCall(USDC_ADDRESS);
+        const hexBridged = await fetchCall(USDC_E_ADDRESS);
         
-        // Also fetch treasury balance if admin (check email OR wallet)
-        if (userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || address === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') {
-          const tBal = await getBalance(PRIMARY_WALLET);
-          setTreasuryBalance(tBal);
+        let total = 0;
+        if (hexNative && hexNative !== '0x' && hexNative.length > 10) {
+          total += Number(BigInt(hexNative)) / 10 ** USDC_DECIMALS;
         }
+        if (hexBridged && hexBridged !== '0x' && hexBridged.length > 10) {
+          total += Number(BigInt(hexBridged)) / 10 ** USDC_E_DECIMALS;
+        }
+        return total;
+      };
+
+      // Aggregate balances from ALL detected wallets
+      let totalWalletBalance = 0;
+      const detectedWallets = userInfo.wallets || [];
+      
+      for (const wallet of detectedWallets) {
+        if (wallet.public_address) {
+          const bal = await getBalance(wallet.public_address);
+          totalWalletBalance += bal;
+        }
+      }
+
+      // If no wallets in list, check the main public_address
+      if (detectedWallets.length === 0 && (userInfo as any).public_address) {
+        totalWalletBalance = await getBalance((userInfo as any).public_address);
+      }
+
+      console.log(`[Diagnostic] Aggregate Wallet Balance: ${totalWalletBalance}`);
+      
+      // Update local address if not set
+      const primaryAddr = forcedAddress || userAddress || detectedWallets[0]?.public_address || (userInfo as any).public_address;
+      if (primaryAddr && !userAddress) setUserAddress(primaryAddr);
+
+      // Fetch treasury balance if admin (check email OR wallet)
+      const currentAddress = primaryAddr;
+      if (userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || currentAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') {
+        const tBal = await getBalance(PRIMARY_WALLET);
+        setTreasuryBalance(tBal);
+      }
       } catch (err) {
         console.error('Balance fetch error:', err);
       }
