@@ -222,9 +222,8 @@ export default function App() {
       } catch (err) {
         console.error('Balance fetch error:', err);
       }
-    }
 
-    try {
+      try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
