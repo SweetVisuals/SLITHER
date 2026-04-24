@@ -91,24 +91,19 @@ export default function App() {
       if (connectionStatus === 'connected' && userInfo) {
         console.log('User logged in, userInfo:', userInfo);
         
-        // For Arbitrum (EVM), we look for the standard EVM address
+        // Particle Network with ERC-4337 can have multiple addresses.
+        // We need to find the Smart Account (AA) address if it exists, or the EVM address.
+        console.log('All Wallets:', userInfo.wallets);
+        
+        const smartAccount = userInfo.wallets?.find((w: any) => w.type?.toLowerCase().includes('smart') || w.type?.toLowerCase() === 'aa');
         const evmWallet = userInfo.wallets?.find((w: any) => 
           w.chain_name?.toLowerCase().includes('arbitrum') || 
-          w.chain_name?.toLowerCase().includes('ethereum') ||
           w.public_address?.startsWith('0x')
         );
         
-        let address = evmWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
+        let address = smartAccount?.public_address || evmWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
         
-        // Fallback to provider
-        if (!address && provider) {
-          try {
-            const accounts = await (provider as any).request({ method: 'eth_accounts' });
-            if (accounts && accounts.length > 0) address = accounts[0];
-          } catch (e) {
-            console.error('Error fetching accounts from provider:', e);
-          }
-        }
+        console.log('Selected Address for Balance Check:', address);
 
         if (address) {
           console.log('Setting userAddress:', address);
@@ -125,7 +120,8 @@ export default function App() {
     
     // Fetch wallet balance if available
     let walletBalance = 0;
-    const address = userAddress || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
+    const smartAccount = userInfo.wallets?.find((w: any) => w.type?.toLowerCase().includes('smart') || w.type?.toLowerCase() === 'aa');
+    const address = userAddress || smartAccount?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
     
     if (address && !userAddress) setUserAddress(address);
 
