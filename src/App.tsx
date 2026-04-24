@@ -89,16 +89,20 @@ export default function App() {
       if (connectionStatus === 'connected' && userInfo) {
         console.log('User logged in, userInfo:', userInfo);
         
-        // Try multiple paths for the address
-        let address = userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
+        // Specifically look for Solana wallet in Particle's wallet list
+        const solanaWallet = userInfo.wallets?.find((w: any) => 
+          w.chain_name?.toLowerCase().includes('solana') || 
+          !w.public_address?.startsWith('0x')
+        );
+        let address = solanaWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
         
-        // Fallback to provider if still missing
+        // Fallback to provider if still missing (though provider is usually secondary for address)
         if (!address && provider) {
           try {
             const accounts = await (provider as any).request({ method: 'eth_accounts' });
             if (accounts && accounts.length > 0) address = accounts[0];
           } catch (e) {
-            console.error('Error fetching accounts from provider:', e);
+            console.warn('Provider accounts fetch skipped or failed');
           }
         }
 
@@ -121,28 +125,15 @@ export default function App() {
     
     if (address && !userAddress) setUserAddress(address);
 
+    // Solana Balance Fetching (Requires @solana/web3.js or similar)
+    // For now, we rely on the database balance which is updated via our backend/webhooks.
+    // If you need real-time on-chain balance on Solana, we would implement a Solana RPC call here.
+    /*
     if (address && provider) {
-      try {
-        // Fetch USDC Balance using eth_call
-        // Selector for balanceOf(address): 0x70a08231
-        const data = '0x70a08231' + address.replace('0x', '').padStart(64, '0');
-        const hexBalance = await (provider as any).request({
-          method: 'eth_call',
-          params: [{
-            to: USDC_ADDRESS,
-            data: data
-          }, 'latest'],
-        });
-        
-        if (hexBalance && hexBalance !== '0x') {
-          const rawBalance = BigInt(hexBalance);
-          // 1 USDC = 1 Credit
-          walletBalance = Number(rawBalance) / 10 ** USDC_DECIMALS; 
-        }
-      } catch (err) {
-        console.error('USDC balance fetch error:', err);
-      }
+      // Solana uses a different protocol for balance fetching
+      console.log('Solana on-chain balance fetch pending implementation');
     }
+    */
 
     try {
       const { data, error } = await supabase
