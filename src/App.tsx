@@ -27,7 +27,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Bell,
-  Info
+  Info,
+  Crown
 } from 'lucide-react';
 import { useConnect, useAuthCore } from '@particle-network/auth-core-modal';
 import { QRCodeCanvas } from 'qrcode.react';
