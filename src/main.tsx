@@ -34,8 +34,8 @@ createRoot(document.getElementById('root')!).render(
           version: '1.0.0',
         },
         chainConfig: {
-          name: 'Arbitrum',
-          id: 42161,
+          name: 'Solana',
+          id: 101,
         },
         wallet: {
           visible: false,

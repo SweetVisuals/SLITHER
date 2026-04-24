@@ -70,9 +70,9 @@ export default function App() {
   }>({ show: false, title: '', message: '', onConfirm: () => {} });
 
   // CONFIGURATION
-  const PRIMARY_WALLET = '0xbf191b6775ca615d3f3227373e660861959e0035'; 
-  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Native USDC on Arbitrum
-  const USDC_DECIMALS = 6; // USDC on Arbitrum has 6 decimals
+  const PRIMARY_WALLET = 'Fu5HDi6zb68BL3HtuUKyDwEzWVhvWaxkNoi7wWSinz8f'; 
+  const USDC_ADDRESS = 'EPjFW36MtvC7616vB51v1nv6jw9383L8pn7G'; // USDC on Solana
+  const USDC_DECIMALS = 6; // USDC on Solana has 6 decimals
 
   const notify = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -89,24 +89,14 @@ export default function App() {
       if (connectionStatus === 'connected' && userInfo) {
         console.log('User logged in, userInfo:', userInfo);
         
-        // For Arbitrum (EVM), we look for the standard EVM address
-        const evmWallet = userInfo.wallets?.find((w: any) => 
-          w.chain_name?.toLowerCase().includes('arbitrum') || 
-          w.chain_name?.toLowerCase().includes('ethereum') ||
-          w.public_address?.startsWith('0x')
+        // Find Solana wallet specifically
+        const solanaWallet = userInfo.wallets?.find((w: any) => 
+          w.chain_name?.toLowerCase().includes('solana') || 
+          w.chain_name?.toLowerCase() === 'solana' ||
+          !w.public_address?.startsWith('0x')
         );
         
-        let address = evmWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
-        
-        // Fallback to provider
-        if (!address && provider) {
-          try {
-            const accounts = await (provider as any).request({ method: 'eth_accounts' });
-            if (accounts && accounts.length > 0) address = accounts[0];
-          } catch (e) {
-            console.error('Error fetching accounts from provider:', e);
-          }
-        }
+        let address = solanaWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
 
         if (address) {
           console.log('Setting userAddress:', address);
@@ -127,28 +117,13 @@ export default function App() {
     
     if (address && !userAddress) setUserAddress(address);
 
+    // Solana Balance Fetching (Requires @solana/web3.js or similar)
+    // For now, we rely on the database balance which is updated via our backend/webhooks.
+    /*
     if (address && provider) {
-      try {
-        // Fetch USDC Balance using eth_call
-        // Selector for balanceOf(address): 0x70a08231
-        const data = '0x70a08231' + address.replace('0x', '').padStart(64, '0');
-        const hexBalance = await (provider as any).request({
-          method: 'eth_call',
-          params: [{
-            to: USDC_ADDRESS,
-            data: data
-          }, 'latest'],
-        });
-        
-        if (hexBalance && hexBalance !== '0x') {
-          const rawBalance = BigInt(hexBalance);
-          // 1 USDC = 1 Credit
-          walletBalance = Number(rawBalance) / 10 ** USDC_DECIMALS; 
-        }
-      } catch (err) {
-        console.error('USDC balance fetch error:', err);
-      }
+      console.log('Solana on-chain balance fetch pending implementation');
     }
+    */
 
     try {
       const { data, error } = await supabase
@@ -821,7 +796,7 @@ export default function App() {
                       onClick={() => setIsBalanceVisible(!isBalanceVisible)}
                       className="px-3 py-1 bg-sky-500/10 rounded-full flex items-center gap-2 hover:bg-sky-500/20 transition-colors"
                     >
-                      <span className="text-sky-400 font-mono text-[10px] uppercase font-bold">ARBITRUM USDC NETWORK</span>
+                      <span className="text-sky-400 font-mono text-[10px] uppercase font-bold">SOLANA USDC NETWORK</span>
                       {isBalanceVisible ? <Eye className="w-3 h-3 text-sky-400" /> : <EyeOff className="w-3 h-3 text-sky-400" />}
                     </button>
                   </div>
@@ -913,7 +888,7 @@ export default function App() {
                 
                 <div className="w-full space-y-4">
                   <div className="p-6 bg-slate-950/50 rounded-2xl space-y-3">
-                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest text-center">Your Deposit Address (ARBITRUM)</p>
+                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest text-center">Your Deposit Address (SOLANA)</p>
                     <div className="flex items-center justify-center gap-3">
                       <span className="text-xs font-bold text-sky-400 font-mono break-all text-center">
                         {userAddress}
@@ -933,7 +908,7 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-slate-800/30 rounded-2xl flex flex-col items-center justify-center gap-1">
                       <span className="text-[10px] text-slate-500 uppercase font-bold">Network</span>
-                      <span className="text-sm font-black text-white">Arbitrum One</span>
+                      <span className="text-sm font-black text-white">Solana (SPL)</span>
                     </div>
                     <div className="p-4 bg-slate-800/30 rounded-2xl flex flex-col items-center justify-center gap-1">
                       <span className="text-[10px] text-slate-500 uppercase font-bold">Asset</span>
