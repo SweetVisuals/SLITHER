@@ -636,8 +636,9 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 gap-8 mb-12">
-              {/* Admin Treasury Dashboard */}
-              {userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' && (
+              {/* Admin Treasury Dashboard - Check email OR specific admin wallet */}
+              {(userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || 
+                userAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') && (
                 <div className="p-10 bg-gradient-to-br from-purple-900/60 to-slate-900/60 rounded-[40px] border border-purple-500/30 backdrop-blur-2xl shadow-2xl relative overflow-hidden group">
                   <div className="absolute -top-24 -right-24 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl group-hover:bg-purple-500/20 transition-all" />
                   
