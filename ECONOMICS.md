@@ -8,8 +8,8 @@ Players can "Inject Funds" to artificially increase their balance in $5 incremen
 
 ## 2. Session Buy-in
 Every single round of Slither operates as an arcade-style wager. 
-* **Cost:** It costs exactly **$5.00** to launch a session. 
-* **Execution:** When the user clicks "Launch Session", $5.00 is immediately deducted from their `balance`. If their balance drops below $5.00, they are locked out of the game until they inject more funds.
+* **Cost:** It costs exactly **$0.01** to launch a session. 
+* **Execution:** When the user clicks "Launch Session", $0.01 is immediately deducted from their `balance`. If their balance drops below $0.01, they are locked out of the game until they inject more funds.
 
 ## 3. Entity Valuation
 Every snake in the arena (including the 25 AI-controlled bots) acts as a walking wallet.

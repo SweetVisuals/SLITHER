@@ -50,9 +50,9 @@ Deno.serve(async (req) => {
       if (fetchError || !profile) throw new Error('Profile not found');
       
       const isTest = payload.isTest || false;
-      if (!isTest && profile.balance < 5) throw new Error('Insufficient balance');
+      if (!isTest && profile.balance < 0.01) throw new Error('Insufficient balance');
 
-      const newBalance = isTest ? profile.balance : profile.balance - 5;
+      const newBalance = isTest ? profile.balance : profile.balance - 0.01;
 
       // 2. Update balance and create session
       const { error: updateError } = await supabaseClient
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
         .from('sessions')
         .insert([{
           user_id: userId,
-          buy_in: isTest ? 0 : 5,
+          buy_in: isTest ? 0 : 0.01,
           status: 'active',
           metadata: { isTest }
         }])

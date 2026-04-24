@@ -6,6 +6,7 @@ interface GameProps {
   onScoreUpdate: (score: number) => void;
   onMoneyCollect: (amount: number, dropId?: string) => void;
   userProfile?: any;
+  isTestMode: boolean;
 }
 
 const WORLD_SIZE = 4000;
@@ -71,7 +72,7 @@ function lerpAngle(a: number, b: number, t: number) {
   return a + delta * t;
 }
 
-export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userProfile }: GameProps) {
+export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userProfile, isTestMode }: GameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameOverRef = useRef(onGameOver);
   const scoreUpdateRef = useRef(onScoreUpdate);
@@ -96,6 +97,11 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
 
     let animationId: number;
     let isRunning = true;
+    
+    // Clear any stale remote players on mount
+    remotePlayersRef.current.clear();
+    
+    const localPlayerId = userProfile?.id || 'player-' + Math.random().toString(36).slice(2, 7);
     
     let width = window.innerWidth;
     let height = window.innerHeight;
@@ -137,6 +143,8 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
     channel
       .on('broadcast', { event: 'pos' }, ({ payload }) => {
         const { id, name, segments, angle, score, color } = payload;
+        if (id === localPlayerId) return; // Skip self to prevent ghost duplicate
+        
         remotePlayersRef.current.set(id, {
           id,
           name,
@@ -200,6 +208,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
 
     let foods: Food[] = [];
     let bots: Snake[] = [];
+    const effectiveBotCount = isTestMode ? BOT_COUNT : 0;
     const BOT_NAMES = ['destroyer', 'slyther', 'venom', 'snek', 'noodle', 'danger_noodle', 'worm', 'alpha', 'beta', 'chomper', 'glizzy', 'slithers', 'voldemort', 'python', 'anaconda', 'boa', 'cobra', 'mamba', 'viper', 'rattler', 'basilisk', 'serpent', 'slimy', 'scaly', 'fang', 'hiss'];
     
     const getSafeSpawnPoint = (excludePlayer = false) => {
@@ -249,7 +258,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
     }
 
     let player: Snake = {
-      id: userProfile?.id || 'player-' + Math.random().toString(36).slice(2, 7),
+      id: localPlayerId,
       isPlayer: true,
       name: userProfile?.name || 'You',
       segments: playerSegments,
@@ -281,15 +290,15 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
     };
 
     for (let i = 0; i < MAX_FOODS; i++) spawnFood();
-    for (let i = 0; i < BOT_COUNT; i++) spawnBot();
+    for (let i = 0; i < effectiveBotCount; i++) spawnBot();
 
     const killSnake = async (snake: Snake) => {
       if (snake.dead) return;
       snake.dead = true;
       
       // Economic Calculation based on ECONOMICS.md
-      // Total Drop Value = Base $5.00 + (50% of the dead snake's collectedMoney)
-      const totalWealth = 5.0 + (snake.collectedMoney * 0.5);
+      // Total Drop Value = Base $0.05 + (50% of the dead snake's collectedMoney)
+      const totalWealth = 0.05 + (snake.collectedMoney * 0.5);
       // Applying 5% House Rake
       const lootToDrop = totalWealth * 0.95;
       
@@ -499,7 +508,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
         }
       });
 
-      while (bots.length < BOT_COUNT) spawnBot();
+      while (bots.length < effectiveBotCount) spawnBot();
       while (foods.length < MAX_FOODS) spawnFood();
 
       if (player.dead && !gameOverTriggered && deathTime && (Date.now() - deathTime > 3500)) {
@@ -529,15 +538,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       ctx.save();
       ctx.translate(width / 2 - pCameraHead.x, height / 2 - pCameraHead.y);
 
-      // Grid
-      ctx.strokeStyle = 'rgba(56,189,248,0.05)';
-      ctx.lineWidth = 1;
-      for (let x = 0; x <= WORLD_SIZE; x += 100) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_SIZE); ctx.stroke();
-      }
-      for (let y = 0; y <= WORLD_SIZE; y += 100) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_SIZE, y); ctx.stroke();
-      }
+
 
       // Food & Drops
       [...foods, ...dropsRef.current].forEach(f => {
@@ -573,10 +574,10 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
             ctx.fillStyle = grad;
             ctx.fill();
             
-            // Premium Border
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-            ctx.lineWidth = 2;
-            ctx.stroke();
+
+            
+            
+            
             
             // Sparkle effect
             if (pulse > 0.8) {
@@ -650,12 +651,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       ctx.roundRect(0, 0, mapSize, mapSize, 12);
       ctx.fill();
       
-      // Map Border
-      ctx.strokeStyle = 'rgba(56,189,248,0.2)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      
-      // Render Snakes on Map
+
       snakesToDraw.forEach(s => {
         const head = s.segments[0];
         if (!head) return;
@@ -714,8 +710,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       channel.unsubscribe();
       dropsSubscription.unsubscribe();
     };
-  }, [userProfile]);
+  }, [userProfile, isTestMode]);
 
   return <canvas ref={canvasRef} className="block w-full h-full cursor-crosshair touch-none" />;
 }
-

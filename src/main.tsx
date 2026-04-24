@@ -34,8 +34,8 @@ createRoot(document.getElementById('root')!).render(
           version: '1.0.0',
         },
         chainConfig: {
-          name: 'BSC',
-          id: 56,
+          name: 'Solana',
+          id: 101,
         },
         wallet: {
           visible: false,

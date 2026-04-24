@@ -157,8 +157,7 @@ export default function Crash({ balance, onBalanceChange, onExit }: GameProps) {
                      <circle cx="50" cy="50" r="2" fill="#38bdf8" className="animate-ping" />
                  )}
              </svg>
-             <div className="absolute bottom-0 left-0 w-full h-[1px] bg-slate-700"></div>
-             <div className="absolute top-0 left-0 w-[1px] h-full bg-slate-700"></div>
+
          </div>
        </div>
 

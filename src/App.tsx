@@ -70,9 +70,9 @@ export default function App() {
   }>({ show: false, title: '', message: '', onConfirm: () => {} });
 
   // CONFIGURATION
-  const PRIMARY_WALLET = '0xbf191b6775ca615d3f3227373e660861959e0035';
-  const USDC_ADDRESS = '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d'; // USDC on BSC (BEP20)
-  const USDC_DECIMALS = 18; // USDC on BSC has 18 decimals
+  const PRIMARY_WALLET = '0xbf191b6775ca615d3f3227373e660861959e0035'; // TODO: Update to Solana Address
+  const USDC_ADDRESS = 'EPjFW36MtvC7616vB51v1nv6jw9383L8pn7G'; // USDC on Solana
+  const USDC_DECIMALS = 6; // USDC on Solana has 6 decimals
 
   const notify = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -237,11 +237,11 @@ export default function App() {
 
   const startGame = async () => {
     if (selectedGame === 'SLITHER') {
-       if (!isTestMode && balance < 5) {
+       if (!isTestMode && balance < 0.05) {
          setConfirmModal({
            show: true,
            title: 'Insufficient Credits',
-           message: '$5.00 Entry Fee required. Please top up your balance to continue.',
+           message: '$0.05 Entry Fee required. Please top up your balance to continue.',
            onConfirm: () => setIsDepositWizardOpen(true)
          });
          return;
@@ -273,7 +273,7 @@ export default function App() {
           setTotalSessions(prev => prev + 1);
           setScore(0);
           setCurrentPage('PLAYING');
-          if (!isTestMode) notify('Session Started: -$5.00', 'info');
+          if (!isTestMode) notify('Session Started: -$0.05', 'info');
           else notify('Test Session Started (Free)', 'info');
         } catch (err: any) {
           console.error('Start game error:', err);
@@ -458,7 +458,7 @@ export default function App() {
           <div className="relative z-10 w-full mt-8 space-y-4 font-mono">
             {connectionStatus === 'loading' ? (
                <div className="py-12 flex items-center justify-center">
-                  <div className="w-12 h-12 border-t-transparent rounded-full animate-spin"></div>
+                  <div className="w-12 h-12 rounded-full animate-spin"></div>
                </div>
             ) : (
               <>
@@ -657,7 +657,7 @@ export default function App() {
                           <span className="text-sky-400 font-mono text-xs uppercase font-bold tracking-[0.2em]">Live Protocol</span>
                        </div>
                        <div className="px-4 py-1.5 bg-yellow-500/20 rounded-full backdrop-blur-md">
-                          <span className="text-yellow-400 font-mono text-xs uppercase font-bold tracking-[0.2em]">$5.00 ENTRY</span>
+                          <span className="text-yellow-400 font-mono text-xs uppercase font-bold tracking-[0.2em]">$0.05 ENTRY</span>
                        </div>
                     </div>
                     
@@ -692,7 +692,7 @@ export default function App() {
               
               {/* Test Mode Protocol Toggle - ADMIN ONLY */}
               {isAdmin && (
-                <div className="mt-8 flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-sky-500/10 backdrop-blur-xl">
+                <div className="mt-8 flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl backdrop-blur-xl">
                   <div className="flex items-center gap-3">
                     <div className={`w-2 h-2 rounded-full ${isTestMode ? 'bg-yellow-500 animate-pulse' : 'bg-slate-700'}`}></div>
                     <div className="flex flex-col">
@@ -705,7 +705,7 @@ export default function App() {
                     className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all ${
                       isTestMode 
                         ? 'bg-yellow-500 text-slate-950 shadow-lg shadow-yellow-500/20' 
-                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        : 'bg-slate-800 text-slate-400'
                     }`}
                   >
                     {isTestMode ? 'TEST MODE ACTIVE' : 'ENABLE TEST MODE'}
@@ -753,7 +753,7 @@ export default function App() {
             </div>
 
             {/* Credits HUD - Bottom on mobile, Top-Right on desktop */}
-            <div className="fixed bottom-6 right-6 md:top-6 md:right-8 md:bottom-auto z-[120] flex items-center gap-4 bg-slate-900/40 backdrop-blur-2xl p-2 pl-4 md:pl-6 rounded-xl md:rounded-2xl shadow-2xl pointer-events-auto border border-white/5">
+            <div className="fixed bottom-6 right-6 md:top-6 md:right-8 md:bottom-auto z-[120] flex items-center gap-4 bg-slate-900/40 backdrop-blur-2xl p-2 pl-4 md:pl-6 rounded-xl md:rounded-2xl shadow-2xl pointer-events-auto">
               <div className="flex flex-col items-end">
                 <span className="text-sky-500/60 font-mono text-[8px] md:text-[10px] uppercase tracking-[0.2em] font-bold">Available Credits</span>
                 <span className="text-sm md:text-xl font-black italic tracking-tighter text-white">
@@ -775,6 +775,7 @@ export default function App() {
                 onScoreUpdate={setScore}
                 onMoneyCollect={handleMoneyCollect}
                 userProfile={userProfile}
+                isTestMode={isTestMode}
               />
             )}
           </div>
@@ -814,7 +815,7 @@ export default function App() {
                       onClick={() => setIsBalanceVisible(!isBalanceVisible)}
                       className="px-3 py-1 bg-sky-500/10 rounded-full flex items-center gap-2 hover:bg-sky-500/20 transition-colors"
                     >
-                      <span className="text-sky-400 font-mono text-[10px] uppercase font-bold">BSC USDC NETWORK</span>
+                      <span className="text-sky-400 font-mono text-[10px] uppercase font-bold">SOLANA USDC NETWORK</span>
                       {isBalanceVisible ? <Eye className="w-3 h-3 text-sky-400" /> : <EyeOff className="w-3 h-3 text-sky-400" />}
                     </button>
                   </div>
@@ -873,7 +874,7 @@ export default function App() {
         <div className="fixed inset-0 z-[250] flex items-center justify-center p-6 animate-in fade-in zoom-in duration-300">
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-2xl" onClick={() => setIsDepositWizardOpen(false)}></div>
           
-          <div className="relative w-full max-w-xl bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-800">
+          <div className="relative w-full max-w-xl bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden">
             <div className="p-8 lg:p-12 space-y-8">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -913,7 +914,7 @@ export default function App() {
                 
                 <div className="w-full space-y-4">
                   <div className="p-6 bg-slate-950/50 rounded-2xl space-y-3">
-                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest text-center">Your Deposit Address (BSC)</p>
+                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest text-center">Your Deposit Address (SOLANA)</p>
                     <div className="flex items-center justify-center gap-3">
                       <span className="text-xs font-bold text-sky-400 font-mono break-all text-center">
                         {userAddress}
@@ -933,7 +934,7 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-slate-800/30 rounded-2xl flex flex-col items-center justify-center gap-1">
                       <span className="text-[10px] text-slate-500 uppercase font-bold">Network</span>
-                      <span className="text-sm font-black text-white">BSC (BEP20)</span>
+                      <span className="text-sm font-black text-white">Solana (SPL)</span>
                     </div>
                     <div className="p-4 bg-slate-800/30 rounded-2xl flex flex-col items-center justify-center gap-1">
                       <span className="text-[10px] text-slate-500 uppercase font-bold">Asset</span>
@@ -950,7 +951,7 @@ export default function App() {
                     <button 
                       onClick={handleDemoTopup}
                       disabled={isProcessing}
-                      className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-2xl font-bold text-sm uppercase tracking-tighter transition-all flex items-center justify-center gap-2 border border-sky-500/20"
+                      className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-2xl font-bold text-sm uppercase tracking-tighter transition-all flex items-center justify-center gap-2"
                     >
                       <Zap className="w-4 h-4" />
                       Demo Topup (+$100)
@@ -978,10 +979,10 @@ export default function App() {
               initial={{ opacity: 0, x: 50, scale: 0.9 }}
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 20, scale: 0.95 }}
-              className={`pointer-events-auto p-5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-4 min-w-[320px] border-l-4 ${
-                n.type === 'success' ? 'bg-emerald-500/10 border-emerald-500' :
-                n.type === 'error' ? 'bg-red-500/10 border-red-500' :
-                'bg-sky-500/10 border-sky-500'
+              className={`pointer-events-auto p-5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-4 min-w-[320px] ${
+                n.type === 'success' ? 'bg-emerald-500/10' :
+                n.type === 'error' ? 'bg-red-500/10' :
+                'bg-sky-500/10'
               }`}
             >
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
@@ -1014,7 +1015,7 @@ export default function App() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-lg bg-slate-900 rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-slate-900 rounded-[3rem] shadow-2xl overflow-hidden"
             >
               {/* Background Accents */}
               <div className="absolute inset-0 bg-gradient-to-b from-red-500/10 to-transparent"></div>
@@ -1028,25 +1029,25 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-6 bg-slate-950/50 rounded-3xl border border-white/5 space-y-1">
+                  <div className="p-6 bg-slate-950/50 rounded-3xl space-y-1">
                     <p className="text-sky-500/60 font-mono text-[10px] uppercase font-bold tracking-widest">Final Mass</p>
                     <p className="text-4xl font-black italic">{gameOverResult.score}</p>
                   </div>
-                  <div className="p-6 bg-slate-950/50 rounded-3xl border border-white/5 space-y-1">
+                  <div className="p-6 bg-slate-950/50 rounded-3xl space-y-1">
                     <p className="text-emerald-500/60 font-mono text-[10px] uppercase font-bold tracking-widest">Global Balance</p>
                     <p className="text-2xl font-black italic">${balance.toFixed(2)}</p>
                   </div>
                 </div>
 
-                <div className="bg-slate-950/80 rounded-[2rem] border border-white/5 overflow-hidden">
-                  <div className="px-8 py-6 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
+                <div className="bg-slate-950/80 rounded-[2rem] overflow-hidden">
+                  <div className="px-8 py-6 flex justify-between items-center bg-white/[0.02]">
                     <span className="text-[10px] font-mono uppercase tracking-[0.2em] font-bold text-slate-400">Financial Summary</span>
                     <TrendingDown className="w-4 h-4 text-red-500/50" />
                   </div>
                   <div className="p-8 space-y-4">
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-400">Session Wager</span>
-                      <span className="text-white font-mono">$5.00</span>
+                      <span className="text-white font-mono">$0.05</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-400">Collected Earnings</span>
@@ -1064,10 +1065,10 @@ export default function App() {
                       <span className="text-red-400/60">House Rake (5%)</span>
                       <span className="text-red-400/60 font-mono">-${gameOverResult.rake.toFixed(2)}</span>
                     </div>
-                    <div className="pt-4 border-t border-white/10 flex justify-between items-baseline">
+                    <div className="pt-4 flex justify-between items-baseline">
                       <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Net Session Profit</span>
-                      <span className={`text-2xl font-black italic ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 5) >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>
-                        ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 5).toFixed(2)}
+                      <span className={`text-2xl font-black italic ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.05) >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>
+                        ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.05).toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -1115,7 +1116,7 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-md bg-slate-900 rounded-[2rem] shadow-2xl border border-slate-800 p-8 space-y-6 overflow-hidden"
+              className="relative w-full max-w-md bg-slate-900 rounded-[2rem] shadow-2xl p-8 space-y-6 overflow-hidden"
             >
               <div className="w-16 h-16 bg-sky-500/10 rounded-2xl flex items-center justify-center">
                 <Bell className="w-8 h-8 text-sky-400" />

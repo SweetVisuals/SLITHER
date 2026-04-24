@@ -205,9 +205,7 @@ export default function Plinko({ balance, onBalanceChange, onExit }: GameProps) 
         ctx.beginPath();
         ctx.arc(ball.x, ball.y, BALL_RADIUS, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+
       }
 
       // Cleanup inactive balls
