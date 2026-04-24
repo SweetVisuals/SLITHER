@@ -72,7 +72,9 @@ export default function App() {
   // CONFIGURATION
   const PRIMARY_WALLET = '0xbf191b6775ca615d3f3227373e660861959e0035'; 
   const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Native USDC on Arbitrum
-  const USDC_DECIMALS = 6; // USDC on Arbitrum has 6 decimals
+  const USDC_E_ADDRESS = '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8'; // Bridged USDC.e on Arbitrum
+  const USDC_DECIMALS = 6; 
+  const USDC_E_DECIMALS = 6;
 
   const notify = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -129,22 +131,36 @@ export default function App() {
 
     if (address && provider) {
       try {
-        // Fetch USDC Balance using eth_call
+        console.log('Fetching USDC balance for address:', address);
         // Selector for balanceOf(address): 0x70a08231
-        const data = '0x70a08231' + address.replace('0x', '').padStart(64, '0');
+        const callData = '0x70a08231' + address.replace('0x', '').padStart(64, '0');
+        
+        // Check Native USDC
         const hexBalance = await (provider as any).request({
           method: 'eth_call',
-          params: [{
-            to: USDC_ADDRESS,
-            data: data
-          }, 'latest'],
+          params: [{ to: USDC_ADDRESS, data: callData }, 'latest'],
         });
         
+        // Check Bridged USDC.e
+        const hexBalanceE = await (provider as any).request({
+          method: 'eth_call',
+          params: [{ to: USDC_E_ADDRESS, data: callData }, 'latest'],
+        });
+        
+        let nativeVal = 0;
+        let bridgedVal = 0;
+
         if (hexBalance && hexBalance !== '0x') {
-          const rawBalance = BigInt(hexBalance);
-          // 1 USDC = 1 Credit
-          walletBalance = Number(rawBalance) / 10 ** USDC_DECIMALS; 
+          nativeVal = Number(BigInt(hexBalance)) / 10 ** USDC_DECIMALS;
+          console.log('Native USDC Balance:', nativeVal);
         }
+        if (hexBalanceE && hexBalanceE !== '0x') {
+          bridgedVal = Number(BigInt(hexBalanceE)) / 10 ** USDC_E_DECIMALS;
+          console.log('Bridged USDC.e Balance:', bridgedVal);
+        }
+
+        walletBalance = nativeVal + bridgedVal;
+        console.log('Total USDC Balance Detected:', walletBalance);
       } catch (err) {
         console.error('USDC balance fetch error:', err);
       }
