@@ -240,8 +240,8 @@ export default function App() {
         setUserProfile(data);
         
         // Sync back to Supabase if wallet balance changed
-        if (walletBalance > 0 && Math.abs(walletBalance - data.balance) > 0.01) {
-          updateUserData({ balance: walletBalance });
+        if (totalWalletBalance > 0 && Math.abs(totalWalletBalance - data.balance) > 0.01) {
+          updateUserData({ balance: totalWalletBalance });
         }
         
         // If profile doesn't have name/email, update it
@@ -250,18 +250,18 @@ export default function App() {
           updateUserData({ 
             email: userInfo.email || data.email,
             name: data.name || fallbackName,
-            wallet_address: address || data.wallet_address
+            wallet_address: primaryAddr || data.wallet_address
           });
           // Update local state immediately
           setUserProfile({ 
             ...data, 
             name: data.name || fallbackName, 
             email: data.email || userInfo.email,
-            wallet_address: address || data.wallet_address
+            wallet_address: primaryAddr || data.wallet_address
           });
         }
       } else if (error && error.code === 'PGRST116') {
-        const initialBalance = walletBalance;
+        const initialBalance = totalWalletBalance;
         const { data: newData, error: insertError } = await supabase
           .from('profiles')
           .insert([{ 
@@ -272,7 +272,7 @@ export default function App() {
             high_score: 0,
             total_injected: 0,
             total_sessions: 0,
-            wallet_address: address
+            wallet_address: primaryAddr
           }])
           .select()
           .single();
