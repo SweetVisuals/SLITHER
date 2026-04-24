@@ -89,21 +89,21 @@ export default function App() {
       if (connectionStatus === 'connected' && userInfo) {
         console.log('User logged in, userInfo:', userInfo);
         
-        // Specifically look for Solana wallet in Particle's wallet list
+        // Log wallets for debugging
+        console.log('Available Wallets:', userInfo.wallets);
+        
+        // Find Solana wallet specifically
         const solanaWallet = userInfo.wallets?.find((w: any) => 
           w.chain_name?.toLowerCase().includes('solana') || 
+          w.chain_name?.toLowerCase() === 'solana' ||
           !w.public_address?.startsWith('0x')
         );
+        
         let address = solanaWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
         
-        // Fallback to provider if still missing (though provider is usually secondary for address)
-        if (!address && provider) {
-          try {
-            const accounts = await (provider as any).request({ method: 'eth_accounts' });
-            if (accounts && accounts.length > 0) address = accounts[0];
-          } catch (e) {
-            console.warn('Provider accounts fetch skipped or failed');
-          }
+        // Final sanity check for Solana format (Base58, length 32-44)
+        if (address && address.startsWith('0x') && connectionStatus === 'connected') {
+          console.warn('Detected 0x address while on Solana network. User may need to logout/login.');
         }
 
         if (address) {
@@ -889,17 +889,10 @@ export default function App() {
                 <div className="p-4 bg-white rounded-3xl shadow-2xl shadow-sky-500/20">
                   <QRCodeCanvas 
                     value={userAddress} 
-                    size={200}
+                    size={240}
                     level="H"
                     includeMargin={true}
-                    imageSettings={{
-                      src: "https://cryptologos.cc/logos/usd-coin-usdc-logo.png",
-                      x: undefined,
-                      y: undefined,
-                      height: 40,
-                      width: 40,
-                      excavate: true,
-                    }}
+                    className="rounded-xl"
                   />
                 </div>
                 
