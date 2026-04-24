@@ -671,7 +671,7 @@ export default function App() {
                     
                     <div className="bg-white/5 rounded-[32px] border border-white/10 p-8 hover:bg-white/10 transition-all flex flex-col md:flex-row items-center gap-8 group/card">
                        <div className="bg-white p-3 rounded-2xl shadow-2xl shadow-white/10 group-hover/card:scale-105 transition-transform">
-                          <QRCode value={PRIMARY_WALLET} size={100} />
+                          <QRCodeCanvas value={PRIMARY_WALLET} size={100} />
                        </div>
                        <div className="flex-1 text-center md:text-left space-y-4">
                           <div>
