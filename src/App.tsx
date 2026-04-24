@@ -89,13 +89,12 @@ export default function App() {
     console.log('Auth State Change:', { connectionStatus, userInfo, hasProvider: !!provider });
     const getAddress = async () => {
       if (connectionStatus === 'connected' && userInfo) {
-        console.log('User logged in, userInfo:', userInfo);
-        
-        // Particle Network with ERC-4337 can have multiple addresses.
-        // We need to find the Smart Account (AA) address if it exists, or the EVM address.
-        console.log('All Wallets:', userInfo.wallets);
-        
-        const smartAccount = userInfo.wallets?.find((w: any) => w.type?.toLowerCase().includes('smart') || w.type?.toLowerCase() === 'aa');
+        // Prioritize the Smart Account (AA) address for Biconomy v2
+        const smartAccount = userInfo.wallets?.find((w: any) => 
+          w.type?.toLowerCase().includes('smart') || 
+          w.type?.toLowerCase() === 'aa' || 
+          w.type?.toLowerCase().includes('biconomy')
+        );
         const evmWallet = userInfo.wallets?.find((w: any) => 
           w.chain_name?.toLowerCase().includes('arbitrum') || 
           w.public_address?.startsWith('0x')
@@ -103,39 +102,44 @@ export default function App() {
         
         let address = smartAccount?.public_address || evmWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
         
-        console.log('Selected Address for Balance Check:', address);
+        console.log('Detected Wallets:', userInfo.wallets);
+        console.log('Selected Smart Address:', smartAccount?.public_address);
+        console.log('Final Selected Address:', address);
 
         if (address) {
-          console.log('Setting userAddress:', address);
           setUserAddress(address);
         }
-        fetchUserData();
+        fetchUserData(address);
       }
     };
     getAddress();
   }, [connectionStatus, userInfo, provider]);
 
-  const fetchUserData = async () => {
+  // Add state for treasury balance
+  const [treasuryBalance, setTreasuryBalance] = useState<number>(0);
+
+  const fetchUserData = async (forcedAddress?: string) => {
     if (!userInfo?.uuid) return;
     
     // Fetch wallet balance if available
     let walletBalance = 0;
-    const smartAccount = userInfo.wallets?.find((w: any) => w.type?.toLowerCase().includes('smart') || w.type?.toLowerCase() === 'aa');
-    const address = userAddress || smartAccount?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
+    const smartAccount = userInfo.wallets?.find((w: any) => 
+      w.type?.toLowerCase().includes('smart') || 
+      w.type?.toLowerCase() === 'aa' ||
+      w.type?.toLowerCase().includes('biconomy')
+    );
+    const address = forcedAddress || userAddress || smartAccount?.public_address || userInfo.wallets?.[0]?.public_address;
     
     if (address && !userAddress) setUserAddress(address);
 
     if (address) {
       try {
-        console.log('Fetching USDC balance for address:', address);
-        // Selector for balanceOf(address): 0x70a08231
-        const callData = '0x70a08231' + address.replace('0x', '').padStart(64, '0');
-        
-        // Use public RPC for more reliability
-        const publicRpc = 'https://arb1.arbitrum.io/rpc';
-        
-        const fetchBalance = async (contract: string) => {
-          try {
+        // Shared balance fetch logic
+        const getBalance = async (targetAddr: string) => {
+          const callData = '0x70a08231' + targetAddr.replace('0x', '').padStart(64, '0');
+          const publicRpc = 'https://arb1.arbitrum.io/rpc';
+          
+          const fetchCall = async (contract: string) => {
             const response = await fetch(publicRpc, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -148,31 +152,30 @@ export default function App() {
             });
             const res = await response.json();
             return res.result;
-          } catch (e) {
-            console.error(`Error fetching balance for ${contract}:`, e);
-            return null;
+          };
+
+          const hexNative = await fetchCall(USDC_ADDRESS);
+          const hexBridged = await fetchCall(USDC_E_ADDRESS);
+          
+          let total = 0;
+          if (hexNative && hexNative !== '0x' && hexNative.length > 10) {
+            total += Number(BigInt(hexNative)) / 10 ** USDC_DECIMALS;
           }
+          if (hexBridged && hexBridged !== '0x' && hexBridged.length > 10) {
+            total += Number(BigInt(hexBridged)) / 10 ** USDC_E_DECIMALS;
+          }
+          return total;
         };
 
-        const hexBalance = await fetchBalance(USDC_ADDRESS);
-        const hexBalanceE = await fetchBalance(USDC_E_ADDRESS);
+        walletBalance = await getBalance(address);
         
-        let nativeVal = 0;
-        let bridgedVal = 0;
-
-        if (hexBalance && hexBalance !== '0x' && hexBalance !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-          nativeVal = Number(BigInt(hexBalance)) / 10 ** USDC_DECIMALS;
-          console.log('Native USDC Balance (Public RPC):', nativeVal);
+        // Also fetch treasury balance if admin
+        if (userInfo.email === 'ptnmgmt@gmail.com') {
+          const tBal = await getBalance(PRIMARY_WALLET);
+          setTreasuryBalance(tBal);
         }
-        if (hexBalanceE && hexBalanceE !== '0x' && hexBalanceE !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-          bridgedVal = Number(BigInt(hexBalanceE)) / 10 ** USDC_E_DECIMALS;
-          console.log('Bridged USDC.e Balance (Public RPC):', bridgedVal);
-        }
-
-        walletBalance = nativeVal + bridgedVal;
-        console.log('Total USDC Balance Detected (Public RPC):', walletBalance);
       } catch (err) {
-        console.error('Public RPC balance fetch error:', err);
+        console.error('Balance fetch error:', err);
       }
     }
 
@@ -669,6 +672,60 @@ export default function App() {
               </div>
 
               <div className="p-8 bg-slate-900 rounded-3xl flex flex-col justify-between shadow-xl">
+                {/* Admin Treasury Dashboard */}
+                {userInfo?.email === 'ptnmgmt@gmail.com' && (
+                  <div className="mb-8 p-6 bg-gradient-to-br from-purple-900/40 to-slate-900/40 rounded-3xl border border-purple-500/30 backdrop-blur-xl">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h3 className="text-xl font-bold text-white mb-1">House Treasury</h3>
+                        <p className="text-xs text-purple-300 font-mono opacity-60">Arbitrum Mainnet Operations</p>
+                      </div>
+                      <div className="bg-purple-500/20 px-3 py-1 rounded-full border border-purple-500/30">
+                        <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">Admin View</span>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Treasury Liquidity</span>
+                        <div className="text-4xl font-black text-white italic">
+                          ${treasuryBalance.toFixed(2)} <span className="text-sm not-italic font-medium text-slate-500">USDC</span>
+                        </div>
+                      </div>
+                      
+                      <div className="p-4 bg-black/40 rounded-2xl border border-white/5">
+                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Deposit to Playing Field</span>
+                         <div className="flex items-center gap-3">
+                            <div className="bg-white p-1 rounded-lg">
+                              <QRCode value={PRIMARY_WALLET} size={64} />
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                              <p className="text-[10px] font-mono text-slate-400 break-all mb-1">{PRIMARY_WALLET}</p>
+                              <button 
+                                onClick={() => {
+                                  navigator.clipboard.writeText(PRIMARY_WALLET);
+                                  notify('Address copied!', 'success');
+                                }}
+                                className="text-[10px] font-bold text-purple-400 hover:text-purple-300 transition-colors uppercase"
+                              >
+                                Copy Address
+                              </button>
+                            </div>
+                         </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="p-8 bg-slate-900/40 rounded-3xl border border-white/5 backdrop-blur-md hover:border-sky-500/30 transition-all group">
+                    <div className="mb-4 p-3 bg-sky-500/10 rounded-2xl w-fit group-hover:scale-110 transition-transform">
+                      <Wallet className="text-sky-400" size={24} />
+                    </div>
+                    <h3 className="text-slate-400 text-sm font-medium mb-1">Wallet Credits</h3>
+                    <div className="text-3xl font-bold text-white font-mono">${balance.toFixed(2)}</div>
+                  </div>
+                </div>
                 <p className="text-sky-400 font-mono text-xs uppercase tracking-widest">Best Mass</p>
                 <div className="text-6xl font-black text-yellow-400">{Math.floor(highScore)}</div>
                 <div className="text-[10px] text-slate-500 uppercase tracking-widest">Geometric Peak</div>
