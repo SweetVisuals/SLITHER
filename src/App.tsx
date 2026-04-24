@@ -170,8 +170,8 @@ export default function App() {
 
         walletBalance = await getBalance(address);
         
-        // Also fetch treasury balance if admin
-        if (userInfo.email === 'ptnmgmt@gmail.com') {
+        // Also fetch treasury balance if admin (check email OR wallet)
+        if (userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || address === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') {
           const tBal = await getBalance(PRIMARY_WALLET);
           setTreasuryBalance(tBal);
         }
