@@ -40,7 +40,7 @@ type Page = 'HOME' | 'PLAYING';
 
 export default function App() {
   const { connect, disconnect, connectionStatus, userInfo: connectUserInfo } = useConnect();
-  const { openWallet, provider, userInfo: authUserInfo } = useAuthCore();
+  const { openWallet, provider, userInfo: authUserInfo, logout } = useAuthCore();
   
   // Combine user info from both sources
   const userInfo = connectUserInfo || authUserInfo;
@@ -50,6 +50,7 @@ export default function App() {
     try {
       setIsProcessing(true);
       await disconnect();
+      if (logout) await logout();
       await supabase.auth.signOut();
       
       // Reset all user-related state
