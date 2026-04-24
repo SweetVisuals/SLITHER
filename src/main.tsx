@@ -30,8 +30,8 @@ createRoot(document.getElementById('root')!).render(
         clientKey: 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
         appId: '8c38a8da-9800-4764-9007-76d512c5163e',
         erc4337: {
-          name: 'SIMPLE',
-          version: '1.0.0',
+          name: 'BICONOMY',
+          version: '2.0.0',
         },
         chainConfig: {
           name: 'Arbitrum',
