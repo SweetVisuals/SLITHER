@@ -45,6 +45,32 @@ export default function App() {
   // Combine user info from both sources
   const userInfo = connectUserInfo || authUserInfo;
   const isAdmin = userInfo?.email === 'ptnmgmt@gmail.com';
+  
+  const handleLogout = async () => {
+    try {
+      setIsProcessing(true);
+      await disconnect();
+      await supabase.auth.signOut();
+      
+      // Reset all user-related state
+      setUserAddress('');
+      setBalance(0);
+      setHighScore(0);
+      setTotalInjected(0);
+      setTotalSessions(0);
+      setUserProfile(null);
+      setTreasuryBalance(0);
+      setEmailInput('');
+      setCurrentPage('HOME');
+      
+      notify('Session terminated successfully', 'success');
+    } catch (err) {
+      console.error('Logout error:', err);
+      notify('Failed to clear session fully', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const [currentPage, setCurrentPage] = useState<Page>('HOME');
   const [selectedGame, setSelectedGame] = useState<'SLITHER'>('SLITHER');
@@ -587,11 +613,14 @@ export default function App() {
             </div>
           </div>
           <button 
-            onClick={() => disconnect()}
-            className="w-full flex items-center justify-center lg:justify-start gap-4 p-4 text-red-400 hover:bg-red-500/10 rounded-2xl transition-all"
+            onClick={handleLogout}
+            disabled={isProcessing}
+            className="w-full flex items-center justify-center lg:justify-start gap-4 p-4 text-red-400 hover:bg-red-500/10 rounded-2xl transition-all disabled:opacity-50"
           >
             <X className="w-6 h-6" />
-            <span className="font-bold text-sm uppercase hidden lg:block">Disconnect</span>
+            <span className="font-bold text-sm uppercase hidden lg:block">
+              {isProcessing ? 'Clearing...' : 'Disconnect'}
+            </span>
           </button>
         </div>
       </nav>
