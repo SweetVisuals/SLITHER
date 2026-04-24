@@ -635,6 +635,63 @@ export default function App() {
                </div>
             </div>
 
+            <div className="grid grid-cols-1 gap-8 mb-12">
+              {/* Admin Treasury Dashboard */}
+              {userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' && (
+                <div className="p-10 bg-gradient-to-br from-purple-900/60 to-slate-900/60 rounded-[40px] border border-purple-500/30 backdrop-blur-2xl shadow-2xl relative overflow-hidden group">
+                  <div className="absolute -top-24 -right-24 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl group-hover:bg-purple-500/20 transition-all" />
+                  
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-10 relative z-10">
+                    <div>
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="bg-purple-500 p-1.5 rounded-lg shadow-lg shadow-purple-500/20">
+                          <Crown className="text-white w-5 h-5" />
+                        </div>
+                        <h3 className="text-2xl font-black text-white tracking-tight uppercase italic">House Treasury</h3>
+                      </div>
+                      <p className="text-sm text-purple-300 font-medium opacity-80">Global Economic Controller • Arbitrum One</p>
+                    </div>
+                    <div className="flex items-center gap-4 bg-purple-500/10 border border-purple-500/20 px-5 py-2.5 rounded-2xl backdrop-blur-md">
+                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                      <span className="text-xs font-bold text-purple-200 uppercase tracking-[0.2em]">System Status: Operational</span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 relative z-10">
+                    <div className="space-y-2">
+                      <span className="text-[11px] font-black text-purple-400/60 uppercase tracking-[0.3em]">Vault Liquidity</span>
+                      <div className="text-7xl font-black text-white tracking-tighter italic flex items-baseline gap-4">
+                        ${treasuryBalance.toFixed(2)}
+                        <span className="text-xl not-italic font-bold text-slate-500 tracking-normal uppercase">USDC</span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium max-w-xs">Total available liquidity for real-time player payouts and field orb maintenance.</p>
+                    </div>
+                    
+                    <div className="bg-white/5 rounded-[32px] border border-white/10 p-8 hover:bg-white/10 transition-all flex flex-col md:flex-row items-center gap-8 group/card">
+                       <div className="bg-white p-3 rounded-2xl shadow-2xl shadow-white/10 group-hover/card:scale-105 transition-transform">
+                          <QRCode value={PRIMARY_WALLET} size={100} />
+                       </div>
+                       <div className="flex-1 text-center md:text-left space-y-4">
+                          <div>
+                            <span className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] block mb-2">Primary Field Address</span>
+                            <p className="text-xs font-mono text-slate-300 break-all leading-relaxed bg-black/40 p-3 rounded-xl border border-white/5">{PRIMARY_WALLET}</p>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              navigator.clipboard.writeText(PRIMARY_WALLET);
+                              notify('Treasury address copied to clipboard', 'success');
+                            }}
+                            className="w-full md:w-auto px-8 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-lg shadow-purple-600/20 active:scale-95"
+                          >
+                            Copy Deposit Address
+                          </button>
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Performance Analytics */}
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
               <div className="lg:col-span-2 p-8 bg-slate-900 rounded-3xl space-y-4 shadow-xl relative overflow-hidden">
@@ -672,60 +729,6 @@ export default function App() {
               </div>
 
               <div className="p-8 bg-slate-900 rounded-3xl flex flex-col justify-between shadow-xl">
-                {/* Admin Treasury Dashboard */}
-                {userInfo?.email === 'ptnmgmt@gmail.com' && (
-                  <div className="mb-8 p-6 bg-gradient-to-br from-purple-900/40 to-slate-900/40 rounded-3xl border border-purple-500/30 backdrop-blur-xl">
-                    <div className="flex items-center justify-between mb-6">
-                      <div>
-                        <h3 className="text-xl font-bold text-white mb-1">House Treasury</h3>
-                        <p className="text-xs text-purple-300 font-mono opacity-60">Arbitrum Mainnet Operations</p>
-                      </div>
-                      <div className="bg-purple-500/20 px-3 py-1 rounded-full border border-purple-500/30">
-                        <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">Admin View</span>
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Treasury Liquidity</span>
-                        <div className="text-4xl font-black text-white italic">
-                          ${treasuryBalance.toFixed(2)} <span className="text-sm not-italic font-medium text-slate-500">USDC</span>
-                        </div>
-                      </div>
-                      
-                      <div className="p-4 bg-black/40 rounded-2xl border border-white/5">
-                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Deposit to Playing Field</span>
-                         <div className="flex items-center gap-3">
-                            <div className="bg-white p-1 rounded-lg">
-                              <QRCode value={PRIMARY_WALLET} size={64} />
-                            </div>
-                            <div className="flex-1 overflow-hidden">
-                              <p className="text-[10px] font-mono text-slate-400 break-all mb-1">{PRIMARY_WALLET}</p>
-                              <button 
-                                onClick={() => {
-                                  navigator.clipboard.writeText(PRIMARY_WALLET);
-                                  notify('Address copied!', 'success');
-                                }}
-                                className="text-[10px] font-bold text-purple-400 hover:text-purple-300 transition-colors uppercase"
-                              >
-                                Copy Address
-                              </button>
-                            </div>
-                         </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="p-8 bg-slate-900/40 rounded-3xl border border-white/5 backdrop-blur-md hover:border-sky-500/30 transition-all group">
-                    <div className="mb-4 p-3 bg-sky-500/10 rounded-2xl w-fit group-hover:scale-110 transition-transform">
-                      <Wallet className="text-sky-400" size={24} />
-                    </div>
-                    <h3 className="text-slate-400 text-sm font-medium mb-1">Wallet Credits</h3>
-                    <div className="text-3xl font-bold text-white font-mono">${balance.toFixed(2)}</div>
-                  </div>
-                </div>
                 <p className="text-sky-400 font-mono text-xs uppercase tracking-widest">Best Mass</p>
                 <div className="text-6xl font-black text-yellow-400">{Math.floor(highScore)}</div>
                 <div className="text-[10px] text-slate-500 uppercase tracking-widest">Geometric Peak</div>
