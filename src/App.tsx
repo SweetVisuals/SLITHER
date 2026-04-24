@@ -198,14 +198,20 @@ export default function App() {
         }
         
         // If profile doesn't have name/email, update it
-        if (!data.email || !data.name) {
+        if (!data.email || !data.name || !data.wallet_address) {
           const fallbackName = userInfo.name || (userInfo.email ? userInfo.email.split('@')[0] : 'Operator ' + userInfo.uuid.slice(0, 4));
           updateUserData({ 
             email: userInfo.email || data.email,
-            name: data.name || fallbackName
+            name: data.name || fallbackName,
+            wallet_address: address || data.wallet_address
           });
           // Update local state immediately
-          setUserProfile({ ...data, name: data.name || fallbackName, email: data.email || userInfo.email });
+          setUserProfile({ 
+            ...data, 
+            name: data.name || fallbackName, 
+            email: data.email || userInfo.email,
+            wallet_address: address || data.wallet_address
+          });
         }
       } else if (error && error.code === 'PGRST116') {
         const initialBalance = walletBalance;
@@ -218,7 +224,8 @@ export default function App() {
             balance: initialBalance,
             high_score: 0,
             total_injected: 0,
-            total_sessions: 0
+            total_sessions: 0,
+            wallet_address: address
           }])
           .select()
           .single();

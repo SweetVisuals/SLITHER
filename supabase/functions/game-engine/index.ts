@@ -145,25 +145,27 @@ Deno.serve(async (req) => {
     if (action === 'DIE') {
       const { x, y, sessionEarnings } = payload;
       
-      // 1. Get active session and current balance
+      // 1. Get profile and active session
       const { data: profile, error: profileError } = await supabaseClient
         .from('profiles')
-        .select('balance')
+        .select('balance, wallet_address')
         .eq('id', userId)
         .single();
         
       if (profileError) throw profileError;
 
-      // Correct Economic Penalty: 50% of SESSION EARNINGS
+      // Calculate Economic Penalty: 50% of SESSION EARNINGS
       const earnings = sessionEarnings || 0;
       const penalty = earnings * 0.5;
+      const playerPayout = earnings - penalty;
+      
       const newBalance = Math.max(0, (Number(profile.balance) || 0) - penalty);
       
-      const entryFeeDrop = 0.10 * 0.5; // 50% of the entry fee redistributed
+      const entryFeeDrop = 0.10 * 0.5; 
       const houseRake = (penalty + entryFeeDrop) * 0.05;
       const totalToDrop = Math.max(0, (penalty + entryFeeDrop) - houseRake);
 
-      // 2. Update balance and close session
+      // 2. Update DB balance and close session
       await supabaseClient
         .from('profiles')
         .update({ balance: newBalance })
@@ -171,14 +173,18 @@ Deno.serve(async (req) => {
 
       await supabaseClient
         .from('sessions')
-        .update({ status: 'finished', finished_at: new Date().toISOString() })
+        .update({ 
+            status: 'finished', 
+            finished_at: new Date().toISOString(),
+            collected_money: earnings
+        })
         .eq('user_id', userId)
         .eq('status', 'active');
 
-      // 3. Create drops (scattered around death location)
+      // 3. Create persistent drops for redistribution
       if (totalToDrop > 0) {
         const drops = [];
-        const dropCount = Math.min(10, Math.max(1, Math.floor(totalToDrop / 0.5))); // Split into $0.50 orbs
+        const dropCount = Math.min(10, Math.max(1, Math.floor(totalToDrop / 0.05))); 
         const valuePerDrop = totalToDrop / dropCount;
 
         for (let i = 0; i < dropCount; i++) {
@@ -194,7 +200,32 @@ Deno.serve(async (req) => {
         await supabaseClient.from('drops').insert(drops);
       }
 
-      return new Response(JSON.stringify({ penalty, newBalance }), {
+      // 4. THE MAGIC: Automatic On-Chain Payout
+      let txHash = null;
+      if (playerPayout > 0 && profile.wallet_address) {
+        try {
+          const { ethers } = await import("https://esm.sh/ethers@6.10.0");
+          const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
+          const relayerKey = Deno.env.get('RELAYER_PRIVATE_KEY');
+          
+          if (relayerKey) {
+            const wallet = new ethers.Wallet(relayerKey, provider);
+            const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+            const usdcAbi = ["function transfer(address to, uint256 amount) public returns (bool)"];
+            const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, wallet);
+            
+            // Convert to 6 decimals
+            const amount = ethers.parseUnits(playerPayout.toFixed(6), 6);
+            const tx = await usdcContract.transfer(profile.wallet_address, amount);
+            txHash = tx.hash;
+            console.log(`Automatic payout sent: ${txHash} for ${playerPayout} USDC`);
+          }
+        } catch ( payoutErr ) {
+          console.error('Relayer Payout Failed:', payoutErr);
+        }
+      }
+
+      return new Response(JSON.stringify({ penalty, newBalance, payoutSent: !!txHash, txHash }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
