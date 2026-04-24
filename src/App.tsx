@@ -164,6 +164,7 @@ export default function App() {
       try {
         // Shared balance fetch logic
         const getBalance = async (targetAddr: string) => {
+          console.log(`[Diagnostic] Checking balance for: ${targetAddr}`);
           const callData = '0x70a08231' + targetAddr.replace('0x', '').padStart(64, '0');
           const publicRpc = 'https://arb1.arbitrum.io/rpc';
           
@@ -185,17 +186,24 @@ export default function App() {
           const hexNative = await fetchCall(USDC_ADDRESS);
           const hexBridged = await fetchCall(USDC_E_ADDRESS);
           
+          console.log(`[Diagnostic] Address ${targetAddr} -> Native Hex: ${hexNative}, Bridged Hex: ${hexBridged}`);
+          
           let total = 0;
           if (hexNative && hexNative !== '0x' && hexNative.length > 10) {
-            total += Number(BigInt(hexNative)) / 10 ** USDC_DECIMALS;
+            const nativeVal = Number(BigInt(hexNative)) / 10 ** USDC_DECIMALS;
+            console.log(`[Diagnostic] Native USDC: ${nativeVal}`);
+            total += nativeVal;
           }
           if (hexBridged && hexBridged !== '0x' && hexBridged.length > 10) {
-            total += Number(BigInt(hexBridged)) / 10 ** USDC_E_DECIMALS;
+            const bridgedVal = Number(BigInt(hexBridged)) / 10 ** USDC_E_DECIMALS;
+            console.log(`[Diagnostic] Bridged USDC.e: ${bridgedVal}`);
+            total += bridgedVal;
           }
           return total;
         };
 
         walletBalance = await getBalance(address);
+        console.log(`[Diagnostic] Final Dashboard Balance: ${walletBalance}`);
         
         // Also fetch treasury balance if admin (check email OR wallet)
         if (userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || address === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') {
