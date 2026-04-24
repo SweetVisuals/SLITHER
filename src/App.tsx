@@ -125,40 +125,54 @@ export default function App() {
     
     if (address && !userAddress) setUserAddress(address);
 
-    if (address && provider) {
+    if (address) {
       try {
         console.log('Fetching USDC balance for address:', address);
         // Selector for balanceOf(address): 0x70a08231
         const callData = '0x70a08231' + address.replace('0x', '').padStart(64, '0');
         
-        // Check Native USDC
-        const hexBalance = await (provider as any).request({
-          method: 'eth_call',
-          params: [{ to: USDC_ADDRESS, data: callData }, 'latest'],
-        });
+        // Use public RPC for more reliability
+        const publicRpc = 'https://arb1.arbitrum.io/rpc';
         
-        // Check Bridged USDC.e
-        const hexBalanceE = await (provider as any).request({
-          method: 'eth_call',
-          params: [{ to: USDC_E_ADDRESS, data: callData }, 'latest'],
-        });
+        const fetchBalance = async (contract: string) => {
+          try {
+            const response = await fetch(publicRpc, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'eth_call',
+                params: [{ to: contract, data: callData }, 'latest'],
+                id: 1
+              })
+            });
+            const res = await response.json();
+            return res.result;
+          } catch (e) {
+            console.error(`Error fetching balance for ${contract}:`, e);
+            return null;
+          }
+        };
+
+        const hexBalance = await fetchBalance(USDC_ADDRESS);
+        const hexBalanceE = await fetchBalance(USDC_E_ADDRESS);
         
         let nativeVal = 0;
         let bridgedVal = 0;
 
-        if (hexBalance && hexBalance !== '0x') {
+        if (hexBalance && hexBalance !== '0x' && hexBalance !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
           nativeVal = Number(BigInt(hexBalance)) / 10 ** USDC_DECIMALS;
-          console.log('Native USDC Balance:', nativeVal);
+          console.log('Native USDC Balance (Public RPC):', nativeVal);
         }
-        if (hexBalanceE && hexBalanceE !== '0x') {
+        if (hexBalanceE && hexBalanceE !== '0x' && hexBalanceE !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
           bridgedVal = Number(BigInt(hexBalanceE)) / 10 ** USDC_E_DECIMALS;
-          console.log('Bridged USDC.e Balance:', bridgedVal);
+          console.log('Bridged USDC.e Balance (Public RPC):', bridgedVal);
         }
 
         walletBalance = nativeVal + bridgedVal;
-        console.log('Total USDC Balance Detected:', walletBalance);
+        console.log('Total USDC Balance Detected (Public RPC):', walletBalance);
       } catch (err) {
-        console.error('USDC balance fetch error:', err);
+        console.error('Public RPC balance fetch error:', err);
       }
     }
 
