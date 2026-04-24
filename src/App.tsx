@@ -70,7 +70,7 @@ export default function App() {
   }>({ show: false, title: '', message: '', onConfirm: () => {} });
 
   // CONFIGURATION
-  const PRIMARY_WALLET = '0x12fece3A63F894865C98A2ad3edE27E67361Dd54'; 
+  const PRIMARY_WALLET = '0x157A8176A02d30e12343f8d9c622e6260D350A69'; 
   const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Native USDC on Arbitrum
   const USDC_E_ADDRESS = '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8'; // Bridged USDC.e on Arbitrum
   const USDC_DECIMALS = 6; 
