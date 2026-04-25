@@ -807,44 +807,12 @@ export default function App() {
             <h1 className="text-2xl md:text-3xl font-black italic tracking-tighter premium-gradient-text uppercase">Slider</h1>
           </div>
 
-          <nav className="hidden lg:flex items-center gap-2">
-            <button 
-              onClick={() => setCurrentPage('HOME')}
-              className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${currentPage === 'HOME' ? 'bg-sky-500/10 text-sky-400' : 'text-slate-500 hover:text-white'}`}
-            >
-              Lobby
-            </button>
-            <button 
-              onClick={() => setIsWalletOpen(true)}
-              className="px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest text-slate-500 hover:text-white transition-all"
-            >
-              Vault
-            </button>
-            <button 
-              onClick={() => setCurrentPage('PROFILE')}
-              className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${currentPage === 'PROFILE' ? 'bg-sky-500/10 text-sky-400' : 'text-slate-500 hover:text-white'}`}
-            >
-              Master
-            </button>
-          </nav>
+
         </div>
 
         <div className="flex items-center gap-2 md:gap-4">
            {userAddress ? (
              <div className="flex items-center gap-2 md:gap-4">
-                {/* Mobile Navigation Icons */}
-                <div className="flex lg:hidden items-center gap-1 bg-slate-900/50 p-1 rounded-2xl">
-                  <button onClick={() => setCurrentPage('HOME')} className={`p-3 rounded-xl transition-all ${currentPage === 'HOME' ? 'bg-sky-500 text-slate-950' : 'text-slate-500'}`}>
-                    <LayoutDashboard className="w-5 h-5" />
-                  </button>
-                  <button onClick={() => setIsWalletOpen(true)} className="p-3 rounded-xl text-slate-500">
-                    <Wallet className="w-5 h-5" />
-                  </button>
-                  <button onClick={() => setCurrentPage('PROFILE')} className={`p-3 rounded-xl transition-all ${currentPage === 'PROFILE' ? 'bg-sky-500 text-slate-950' : 'text-slate-500'}`}>
-                    <User className="w-5 h-5" />
-                  </button>
-                </div>
-
                 <div className="hidden lg:block premium-glass px-4 py-2 rounded-2xl border-none">
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Balance</span>
@@ -852,13 +820,13 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Mobile Quick Logout */}
                 <button 
                   onClick={handleLogout}
-                  className="w-12 h-12 bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-slate-950 rounded-2xl flex items-center justify-center transition-all active:scale-90 border-none shadow-xl"
-                  title="Terminate Session"
+                  className="w-12 h-12 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-2xl flex items-center justify-center transition-all active:scale-90 border-none shadow-xl group"
+                  title="Sign Out"
                 >
-                  <X className="w-5 h-5" />
+                  <User className="w-5 h-5 group-hover:hidden" />
+                  <LogOut className="w-5 h-5 hidden group-hover:block" />
                 </button>
              </div>
            ) : (
@@ -1115,73 +1083,8 @@ export default function App() {
                   </button>
                 </div>
               )}
-            </div>
-          )}
-          {currentPage === 'PROFILE' && (
-          <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="premium-glass rounded-[3rem] p-10 md:p-16 space-y-12 relative overflow-hidden border-none">
-              <div className="absolute top-0 right-0 p-8 opacity-5">
-                <User className="w-64 h-64" />
-              </div>
-              
-              <div className="flex flex-col items-center text-center space-y-6 relative z-10">
-                <div className="w-32 h-32 bg-sky-500 rounded-[2.5rem] flex items-center justify-center shadow-2xl shadow-sky-500/40 relative">
-                   <User className="w-16 h-16 text-slate-950" />
-                   <div className="absolute -top-2 -right-2 bg-yellow-400 text-slate-950 p-2 rounded-xl shadow-lg rotate-12">
-                      <Crown className="w-5 h-5" />
-                   </div>
-                </div>
-                <div className="space-y-2">
-                  <h2 className="text-4xl md:text-6xl font-black italic premium-gradient-text uppercase tracking-tighter">
-                    {userProfile?.name || 'Operator Node'}
-                  </h2>
-                  <p className="text-sky-400 font-mono text-sm tracking-[0.3em] font-black uppercase">Level 1 Protocol Master</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
-                <div className="p-8 bg-slate-950/40 rounded-[2rem] border-none space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sky-400 font-mono text-[10px] uppercase font-black tracking-widest">Protocol Stats</h4>
-                    <Activity className="w-4 h-4 text-sky-500/50" />
-                  </div>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-end">
-                      <span className="text-slate-500 text-[10px] uppercase font-black">Total Wagered</span>
-                      <span className="text-xl font-black text-white italic">${Number(totalInjected || 0).toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between items-end">
-                      <span className="text-slate-500 text-[10px] uppercase font-black">Net Yield</span>
-                      <span className={`text-xl font-black italic ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {pnl >= 0 ? '+' : ''}${Number(pnl || 0).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-8 bg-slate-950/40 rounded-[2rem] border-none space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sky-400 font-mono text-[10px] uppercase font-black tracking-widest">Asset Sync</h4>
-                    <RefreshCw className={`w-4 h-4 text-sky-500/50 ${isProcessing ? 'animate-spin' : ''}`} />
-                  </div>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-end">
-                      <span className="text-slate-500 text-[10px] uppercase font-black">Virtual Balance</span>
-                      <span className="text-xl font-black text-white italic">${Number(balance || 0).toFixed(2)}</span>
-                    </div>
-                    <button 
-                      onClick={() => fetchUserData()}
-                      disabled={isProcessing}
-                      className="w-full py-3 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all border-none"
-                    >
-                      {isProcessing ? 'SYNCING ASSETS...' : 'FORCE RE-SCAN WALLETS'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
               {/* Advanced Diagnostics Section */}
-              <div className="space-y-4 relative z-10">
+              <div className="space-y-4 relative z-10 pt-4">
                 <div className="flex items-center gap-3 px-2">
                   <ShieldAlert className="w-4 h-4 text-slate-500" />
                   <h4 className="text-slate-500 font-mono text-[10px] uppercase font-black tracking-widest">Wallet Matrix Diagnostics</h4>
@@ -1229,53 +1132,6 @@ export default function App() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
-                <div className="p-8 bg-slate-950/40 rounded-[2rem] border-none space-y-4">
-                  <div className="flex items-center gap-3 text-slate-500">
-                    <Mail className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Secure Identity</span>
-                  </div>
-                  <p className="text-white font-bold truncate">{userProfile?.email || 'N/A'}</p>
-                </div>
-                <div className="p-8 bg-slate-950/40 rounded-[2rem] border-none space-y-4">
-                  <div className="flex items-center gap-3 text-slate-500">
-                    <Target className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Protocol Address</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <p className="text-white font-mono text-xs truncate flex-1">{userAddress}</p>
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(userAddress);
-                        notify('Address copied', 'success');
-                      }}
-                      className="text-sky-400 hover:text-white transition-colors"
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-8 space-y-6 relative z-10">
-                <h4 className="text-xs font-black text-slate-500 uppercase tracking-[0.4em] text-center">Identity Configuration</h4>
-                <div className="grid grid-cols-1 gap-4">
-                  <button 
-                    onClick={() => setIsWalletOpen(true)}
-                    className="w-full py-6 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-[0.98] border-none shadow-xl flex items-center justify-center gap-3"
-                  >
-                    <Wallet className="w-5 h-5" />
-                    Manage Wallets
-                  </button>
-                  <button 
-                    onClick={handleLogout}
-                    className="w-full py-6 bg-red-500 text-slate-950 hover:bg-red-400 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-[0.98] border-none shadow-lg shadow-red-500/20 flex items-center justify-center gap-3"
-                  >
-                    <X className="w-5 h-5" />
-                    Terminate Session
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         )}
@@ -1342,7 +1198,7 @@ export default function App() {
                   </div>
 
                   <button 
-                    onClick={() => window.open('https://wallet.particle.network', '_blank')}
+                    onClick={() => openWallet()}
                     className="p-6 bg-slate-800/30 hover:bg-slate-800/50 rounded-2xl flex items-center justify-between group transition-all"
                   >
                     <div className="text-left">
