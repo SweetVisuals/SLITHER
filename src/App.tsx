@@ -270,6 +270,12 @@ export default function App() {
         if (!targetAddr || typeof targetAddr !== 'string' || targetAddr === 'null') {
           return 0;
         }
+
+        // Only process EVM addresses
+        if (!targetAddr.startsWith('0x') || targetAddr.length !== 42) {
+          console.log(`[Diagnostic] Skipping non-EVM address: ${targetAddr}`);
+          return 0;
+        }
         
         console.log(`[Diagnostic] Checking balance for: ${targetAddr}`);
         const callData = '0x70a08231' + targetAddr.replace('0x', '').padStart(64, '0');
