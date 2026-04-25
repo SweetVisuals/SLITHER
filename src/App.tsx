@@ -28,7 +28,8 @@ import {
   AlertCircle,
   Bell,
   Info,
-  Crown
+  Crown,
+  LogOut
 } from 'lucide-react';
 import { useConnect, useAuthCore, useEthereum } from '@particle-network/auth-core-modal';
 import { SmartAccount } from '@particle-network/aa';
@@ -384,9 +385,9 @@ export default function App() {
         
         // Determine type for diagnostic display
         let type = 'EOA/External';
-        if (addr === biconomyAddress) type = 'Biconomy V2';
+        if (aaExtras?.biconomyAddress && addr === aaExtras.biconomyAddress) type = 'Biconomy V2';
         else if (addr === (userInfo as any).biconomyV1Address) type = 'Biconomy V1';
-        else if (addr === simpleAddress) type = 'Simple AA V1';
+        else if (aaExtras?.simpleAddress && addr === aaExtras.simpleAddress) type = 'Simple AA V1';
         else if (addr === (userInfo as any).simpleV2Address) type = 'Simple AA V2';
         else if (userInfo.wallets?.some((w: any) => w.public_address === addr)) type = 'Linked Particle';
         
