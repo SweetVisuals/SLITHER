@@ -831,7 +831,7 @@ export default function App() {
              </div>
            ) : (
              <button 
-               onClick={login}
+               onClick={() => connect()}
                disabled={isProcessing}
                className="px-6 md:px-8 py-3 md:py-4 bg-sky-500 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-sky-400 transition-all shadow-lg shadow-sky-500/20 active:scale-95 border-none"
              >
