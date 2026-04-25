@@ -178,7 +178,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
           id: drop.id,
           x: drop.x,
           y: drop.y,
-          color: '#FACC15',
+          color: '#34D399', // Using a bright rainbow-compatible green for persistent drops
           value: 5,
           moneyValue: Number(drop.money_value),
           isDrop: true
@@ -198,7 +198,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
           id: d.id,
           x: d.x,
           y: d.y,
-          color: '#FACC15',
+          color: '#34D399',
           value: 5,
           moneyValue: Number(d.money_value),
           isDrop: true
@@ -241,8 +241,9 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
         const colors = ['#38BDF8', '#818CF8', '#C084FC', '#F472B6', '#FB7185', '#FBBF24', '#34D399'];
         const food = {
             id: Math.random().toString(36),
-            x: x ?? Math.random() * WORLD_SIZE,
-            y: y ?? Math.random() * WORLD_SIZE,
+            // Ensure food spawns inside the arena with a small margin
+            x: Math.max(20, Math.min(WORLD_SIZE - 20, x ?? Math.random() * WORLD_SIZE)),
+            y: Math.max(20, Math.min(WORLD_SIZE - 20, y ?? Math.random() * WORLD_SIZE)),
             color: customColor ?? colors[Math.floor(Math.random() * colors.length)],
             value: val ?? 1,
             moneyValue: moneyVal ?? 0.01,
@@ -297,8 +298,8 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       snake.dead = true;
       
       // Economic Calculation based on user request
-      // Total Drop Value = (50% of Entry Fee: $0.05) + (50% of the dead snake's collectedMoney)
-      const totalWealth = 0.05 + (snake.collectedMoney * 0.5);
+      // Total Drop Value = (Base Drop: $0.50) + (50% of the dead snake's collectedMoney)
+      const totalWealth = 0.50 + (snake.collectedMoney * 0.5);
       // Applying 5% House Rake
       const lootToDrop = totalWealth * 0.95;
       
@@ -307,8 +308,10 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       const moneyPerOrb = lootToDrop / Math.max(1, segmentsToDrop.length);
 
       segmentsToDrop.forEach((seg) => {
-        // Drop gold orbs with calculated monetary value and high mass/score (3)
-        spawnFood(seg.x, seg.y, 3, moneyPerOrb, '#FACC15');
+        // Use rainbow colors for death drops as well to unify the look
+        const rainbowColors = ['#38BDF8', '#818CF8', '#C084FC', '#F472B6', '#FB7185', '#FBBF24', '#34D399'];
+        const randomRainbow = rainbowColors[Math.floor(Math.random() * rainbowColors.length)];
+        spawnFood(seg.x, seg.y, 3, moneyPerOrb, randomRainbow);
       });
 
       if (snake.isPlayer) {
@@ -538,56 +541,43 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       ctx.save();
       ctx.translate(width / 2 - pCameraHead.x, height / 2 - pCameraHead.y);
 
-
-
+      // Map Boundary Border
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)'; // Sky-400
+      ctx.lineWidth = 10;
+      ctx.strokeRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+      
+      // Subtle Grid for better orientation
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.05)';
+      ctx.lineWidth = 2;
+      const gridSize = 200;
+      for (let x = 0; x <= WORLD_SIZE; x += gridSize) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_SIZE); ctx.stroke();
+      }
+      for (let y = 0; y <= WORLD_SIZE; y += gridSize) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_SIZE, y); ctx.stroke();
+      }
       // Food & Drops
       [...foods, ...dropsRef.current].forEach(f => {
         if (f.x > pCameraHead.x - width/2 - 100 && f.x < pCameraHead.x + width/2 + 100 &&
             f.y > pCameraHead.y - height/2 - 100 && f.y < pCameraHead.y + height/2 + 100) {
           
           if (f.isDrop) {
-            // Premium Gold Drop Rendering (Significantly Enhanced)
+            // Money Drops now look like vibrant rainbow food but slightly larger/pulsing
             const pulse = Math.sin(Date.now() / 200) * 0.5 + 0.5;
-            const dropRadius = FOOD_RADIUS * 2.5; // Larger size for premium loot
-            
-            // Outer Glow
-            ctx.globalAlpha = 0.3 + pulse * 0.3;
-            const glow = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, dropRadius * 2.5);
-            glow.addColorStop(0, '#FACC15'); // Gold
-            glow.addColorStop(0.5, 'rgba(251, 191, 36, 0.2)');
-            glow.addColorStop(1, 'transparent');
-            ctx.fillStyle = glow;
-            ctx.beginPath();
-            ctx.arc(f.x, f.y, dropRadius * 2.5, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-
-            // Core Drop with Metallic Gradient
-            const grad = ctx.createRadialGradient(f.x - dropRadius*0.4, f.y - dropRadius*0.4, dropRadius*0.2, f.x, f.y, dropRadius);
-            grad.addColorStop(0, '#FFFBEB'); // Highlight
-            grad.addColorStop(0.3, '#FDE047'); // Bright Yellow
-            grad.addColorStop(0.6, '#EAB308'); // Gold
-            grad.addColorStop(1, '#854D0E'); // Deep Bronze
+            const dropRadius = FOOD_RADIUS * 1.5;
             
             ctx.beginPath();
-            ctx.arc(f.x, f.y, dropRadius, 0, Math.PI * 2);
-            ctx.fillStyle = grad;
+            ctx.arc(f.x, f.y, dropRadius + (pulse * 2), 0, Math.PI * 2);
+            ctx.fillStyle = f.color;
             ctx.fill();
             
-
-            
-            
-            
-            
-            // Sparkle effect
-            if (pulse > 0.8) {
-              ctx.fillStyle = 'white';
-              ctx.beginPath();
-              ctx.arc(f.x + dropRadius*0.3, f.y - dropRadius*0.3, 2, 0, Math.PI*2);
-              ctx.fill();
-            }
+            // Subtle inner glow to distinguish from regular food
+            ctx.beginPath();
+            ctx.arc(f.x, f.y, dropRadius * 0.5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.fill();
           } else {
-            // Standard Food
+            // Regular rainbow food
             ctx.beginPath();
             ctx.arc(f.x, f.y, FOOD_RADIUS, 0, Math.PI * 2);
             ctx.fillStyle = f.color;
@@ -685,14 +675,29 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       // UI
       const margin = 20;
       const topSnakes = [...snakesToDraw].sort((a, b) => b.score - a.score).slice(0, 10);
+      const isMobile = width < 768;
+      const leaderboardY = isMobile ? 180 : 68;
+      
       ctx.fillStyle = 'rgba(15,23,42,0.6)';
-      ctx.fillRect(width - 200 - margin, 68, 200, 30 + topSnakes.length * 20);
-      ctx.font = 'bold 12px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#38BDF8';
-      ctx.fillText('ARENA LEADERS', width - 100 - margin, 85);
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(width - 200 - margin, leaderboardY, 200, 30 + topSnakes.length * 20, 16);
+      } else {
+        ctx.rect(width - 200 - margin, leaderboardY, 200, 30 + topSnakes.length * 20);
+      }
+      ctx.fill();
+      
+      ctx.font = 'bold 12px Inter, sans-serif'; 
+      ctx.textAlign = 'center'; 
+      ctx.fillStyle = '#38BDF8';
+      ctx.fillText('ARENA LEADERS', width - 100 - margin, leaderboardY + 18);
+      
       topSnakes.forEach((s, idx) => {
-         ctx.textAlign = 'left'; ctx.fillStyle = s.isPlayer ? '#38BDF8' : 'rgba(255,255,255,0.7)';
-         ctx.fillText(`${idx + 1}. ${s.name.slice(0, 12)}`, width - 190 - margin, 105 + idx * 20);
-         ctx.textAlign = 'right'; ctx.fillText(`${Math.floor(s.score)}`, width - 10 - margin, 105 + idx * 20);
+         ctx.textAlign = 'left'; 
+         ctx.fillStyle = s.isPlayer ? '#38BDF8' : 'rgba(255,255,255,0.7)';
+         ctx.fillText(`${idx + 1}. ${s.name.slice(0, 12)}`, width - 190 - margin, leaderboardY + 38 + idx * 20);
+         ctx.textAlign = 'right'; 
+         ctx.fillText(`${Math.floor(s.score)}`, width - 10 - margin, leaderboardY + 38 + idx * 20);
       });
 
       if (isRunning) animationId = requestAnimationFrame(loop);

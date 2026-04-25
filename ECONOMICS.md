@@ -8,12 +8,12 @@ Players can "Inject Funds" to artificially increase their balance in $5 incremen
 
 ## 2. Session Buy-in
 Every single round of Slither operates as an arcade-style wager. 
-* **Cost:** It costs exactly **$0.01** to launch a session. 
-* **Execution:** When the user clicks "Launch Session", $0.01 is immediately deducted from their `balance`. If their balance drops below $0.01, they are locked out of the game until they inject more funds.
+* **Cost:** It costs exactly **$0.10** to launch a session. 
+* **Execution:** When the user clicks "Launch Session", $0.10 is immediately deducted from their `balance`. If their balance drops below $0.10, they are locked out of the game until they inject more funds.
 
 ## 3. Entity Valuation
 Every snake in the arena (including the 25 AI-controlled bots) acts as a walking wallet.
-* **Base Value:** Every single snake on the map is intrinsically backed by a base value of **$5.00**. This models a universe where every snake "bought in" for $5.00.
+* **Base Value:** Every single snake on the map is intrinsically backed by a base value of **$0.50**. This models a universe where every snake "bought in" for $0.50.
 * **Accumulated Value (`collectedMoney`):** As snakes (player or bots) traverse the map and consume valuable food, their internal wallet grows. 
 
 ## 4. Death & Loot Drops (The Rake System)
@@ -21,7 +21,7 @@ When a snake crashes into a wall or another snake's body, it dies and its "wealt
 
 ### The Math of a Snake Death:
 When a snake is killed, the drop value is calculated as follows:
-1. **Value Calculation:** `Total Value = Base $5.00 + (50% of the dead snake's collectedMoney)`
+1. **Value Calculation:** `Total Value = Base $0.50 + (50% of the dead snake's collectedMoney)`
 2. **The House Rake:** The platform automatically skims a **5% website fee** off the top of this drop. (`totalValue * 0.95`).
 3. **Passive Redistribution:** A theoretical 1% of the total house rake funds the map ecosystem. Every standard, tiny little colorful food on the map brings the player **$0.01**. This provides an immediate psychological incentive for fresh players to stay alive and slither around, generating a slow trickle of funds before engaging in high-stakes predatory gameplay against bots or other players.
 4. **Distribution:** The post-fee value is divided equally among the physical food orbs the dead snake drops. These massive orbs are distinctly colored `Gold` to visually distinguish them from the $0.01 colorful food.
@@ -37,7 +37,7 @@ When a snake is killed, the drop value is calculated as follows:
 * **Zero Value Drops:** The segments dropped by a snake while dashing do *not* carry any monetary value (`moneyValue = 0`). They only grant score/length points. Financial transfers strictly only happen upon a fatal collision.
 
 ## Summary of House Edges
-1. **The Rake:** 3% taken off every total loot drop.
+1. **The Rake:** 5% taken off every total loot drop.
 2. **The 50% Void:** 50% of a dead snake's accumulated wealth is permanently deleted from the economy upon death.
 3. **The Player Penalty:** If a player earns $100 but gets sloppy and dies, they are instantly taxed $50 out of their account.
 

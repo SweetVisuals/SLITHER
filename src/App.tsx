@@ -30,20 +30,36 @@ import {
   Info,
   Crown
 } from 'lucide-react';
-import { useConnect, useAuthCore } from '@particle-network/auth-core-modal';
+import { useConnect, useAuthCore, useEthereum } from '@particle-network/auth-core-modal';
+import { SmartAccount } from '@particle-network/aa';
+import { ArbitrumOne } from '@particle-network/chains';
 import { QRCodeCanvas } from 'qrcode.react';
 import { supabase } from './lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
-import Game from './components/Game';
+import './premium.css';
 
-type Page = 'HOME' | 'PLAYING';
+type Page = 'HOME' | 'PLAYING' | 'PROFILE';
 
 export default function App() {
   const { connect, disconnect, connectionStatus, userInfo: connectUserInfo } = useConnect();
-  const { openWallet, provider, userInfo: authUserInfo, logout } = useAuthCore();
+  const { openWallet, provider: authProvider, userInfo: authUserInfo, logout } = useAuthCore();
+  const { provider: ethProvider, address: ethAddress } = useEthereum();
   
-  // Combine user info from both sources
-  const userInfo = connectUserInfo || authUserInfo;
+  const provider = authProvider || ethProvider;
+  
+  // Combine user info from both sources more robustly
+  const userInfo = {
+    ...(authUserInfo || {}),
+    ...(connectUserInfo || {}),
+    uuid: connectUserInfo?.uuid || authUserInfo?.uuid,
+    email: authUserInfo?.email || connectUserInfo?.email || (authUserInfo as any)?.thirdparty_user_info?.user_info?.email || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.email,
+    name: authUserInfo?.name || connectUserInfo?.name || (authUserInfo as any)?.thirdparty_user_info?.user_info?.name || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.name,
+    wallets: [
+      ...(connectUserInfo?.wallets || []),
+      ...(authUserInfo?.wallets || [])
+    ]
+  };
+
   const isAdmin = userInfo?.email === 'ptnmgmt@gmail.com';
   
   const handleLogout = async () => {
@@ -89,6 +105,7 @@ export default function App() {
   const [isDepositWizardOpen, setIsDepositWizardOpen] = useState(false);
   const [gameOverResult, setGameOverResult] = useState<{ score: number, collected: number, penalty: number, rake: number } | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [currentSessionLoot, setCurrentSessionLoot] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
@@ -114,48 +131,145 @@ export default function App() {
 
   // Sync with Supabase on auth change
   useEffect(() => {
-    console.log('Auth State Change:', { connectionStatus, userInfo, hasProvider: !!provider });
+    console.log('Auth State Change:', { 
+      connectionStatus, 
+      hasUserInfo: !!userInfo, 
+      walletsCount: userInfo.wallets?.length,
+      hasAuthProvider: !!authProvider,
+      hasEthProvider: !!ethProvider,
+      ethAddress
+    });
+
     const getAddress = async () => {
       if (connectionStatus === 'connected' && userInfo) {
-        // Prioritize the Smart Account (AA) address for Biconomy v2
-        const smartAccount = userInfo.wallets?.find((w: any) => 
+        console.log('[Diagnostic] Full UserInfo keys:', Object.keys(userInfo));
+        
+        let biconomyAddress = '';
+        let simpleAddress = '';
+        
+        if (provider) {
+          try {
+            let chainId = await (provider as any).request({ method: 'eth_chainId' });
+            console.log('[Diagnostic] Current Chain ID:', chainId);
+
+            // Force switch to Arbitrum One (0xa4b1) if on wrong chain
+            if (chainId !== '0xa4b1' && chainId !== 42161) {
+              console.log('[Diagnostic] Attempting to switch to Arbitrum One...');
+              try {
+                await (provider as any).request({
+                  method: 'wallet_switchEthereumChain',
+                  params: [{ chainId: '0xa4b1' }]
+                });
+                // Refresh chainId after switch
+                chainId = await (provider as any).request({ method: 'eth_chainId' });
+                console.log('[Diagnostic] Chain ID after switch:', chainId);
+              } catch (switchErr) {
+                console.warn('[Diagnostic] Chain switch failed:', switchErr);
+              }
+            }
+
+            const initSA = async (type: string, version: string = '2.0.0') => {
+              try {
+                const sa = new SmartAccount(provider, {
+                  projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
+                  clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
+                  appId: import.meta.env.VITE_PARTICLE_APP_ID,
+                  aaOptions: {
+                    accountContracts: {
+                      [type]: [{ version, chainIds: [ArbitrumOne.id] }]
+                    }
+                  }
+                });
+                return await sa.getAddress();
+              } catch (e) {
+                console.warn(`[Diagnostic] Failed to init ${type} ${version} account:`, e);
+                return '';
+              }
+            };
+            
+            biconomyAddress = await initSA('BICONOMY', '2.0.0');
+            const biconomyV1Address = await initSA('BICONOMY', '1.0.0');
+            simpleAddress = await initSA('SIMPLE', '2.0.0');
+            
+            // If the user provided a manual address, let's include it in diagnostics
+            const manualAddress = '0x3B9fB2041b5CF7CC644836E86601413680Dfacb2';
+            
+            console.log('[Diagnostic] AA Addresses found:', { 
+              biconomyAddress, 
+              biconomyV1Address,
+              simpleAddress,
+              manualAddress
+            });
+            
+            // If any of these match the manual address, we know which config to use!
+            if (biconomyV1Address) {
+              // Add to scan set in fetchUserData later
+              (userInfo as any).biconomyV1Address = biconomyV1Address;
+            }
+          } catch (aaInitErr) {
+            console.warn('[Diagnostic] AA SDK overall initialization failed:', aaInitErr);
+          }
+        }
+        
+        // Log all detected wallet data
+        userInfo.wallets?.forEach((w: any, idx: number) => {
+          console.log(`[Diagnostic] Wallet ${idx} address:`, w.public_address);
+        });
+
+        // Prioritize: Biconomy -> Simple -> ethAddress -> wallets list -> EOA
+        const smartAccountFromList = userInfo.wallets?.find((w: any) => 
           w.type?.toLowerCase().includes('smart') || 
-          w.type?.toLowerCase() === 'aa' || 
-          w.type?.toLowerCase().includes('biconomy')
+          w.type?.toLowerCase().includes('aa') || 
+          w.type?.toLowerCase().includes('biconomy') ||
+          w.type?.toLowerCase().includes('erc4337') ||
+          w.type?.toLowerCase().includes('simple') ||
+          w.type?.toLowerCase().includes('light')
         );
+        
         const evmWallet = userInfo.wallets?.find((w: any) => 
-          w.chain_name?.toLowerCase().includes('arbitrum') || 
+          w.chain_name?.toLowerCase().includes('evm') || 
           w.public_address?.startsWith('0x')
         );
         
-        let address = smartAccount?.public_address || evmWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
+        let address = biconomyAddress || simpleAddress || ethAddress || smartAccountFromList?.public_address || evmWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
         
-        console.log('Detected Wallets:', userInfo.wallets);
-        console.log('Selected Smart Address:', smartAccount?.public_address);
+        console.log('Selected Address Logic:', { biconomyAddress, simpleAddress, ethAddress, smartType: smartAccountFromList?.public_address, evmType: evmWallet?.public_address });
         console.log('Final Selected Address:', address);
 
         if (address) {
           setUserAddress(address);
+          fetchUserData(address, 0, { biconomyAddress, simpleAddress });
         }
-        fetchUserData(address);
       }
     };
     getAddress();
-  }, [connectionStatus, userInfo, provider]);
+  }, [connectionStatus, connectUserInfo, authUserInfo, provider]);
 
   // Add state for treasury balance
   const [treasuryBalance, setTreasuryBalance] = useState<number>(0);
 
-  const fetchUserData = async (forcedAddress?: string) => {
+  const fetchUserData = async (forcedAddressInput?: string | any, retryCount = 0, aaExtras?: { biconomyAddress?: string, simpleAddress?: string }) => {
     if (!userInfo?.uuid) return;
+    
+    // Ensure forcedAddress is a string (prevents event objects from leaking in)
+    const forcedAddress = typeof forcedAddressInput === 'string' ? forcedAddressInput : undefined;
     
     try {
       setIsProcessing(true);
       
+      // Only retry if an EVM wallet is null (Solana is often null if not used)
+      const hasNullEVMWallet = userInfo.wallets?.some((w: any) => 
+        (w.chain_name?.toLowerCase().includes('evm') || !w.chain_name) && !w.public_address
+      );
+      if (hasNullEVMWallet && retryCount < 5) {
+        console.log(`[Diagnostic] Null EVM wallet address detected. Retrying fetch in 1.5s... (${retryCount + 1}/5)`);
+        setTimeout(() => fetchUserData(forcedAddress, retryCount + 1), 1500);
+        return;
+      }
+      
       // Shared balance fetch logic
       const getBalance = async (targetAddr: any) => {
-        if (!targetAddr || typeof targetAddr !== 'string') {
-          console.warn('[Diagnostic] Invalid address passed to getBalance:', targetAddr);
+        if (!targetAddr || typeof targetAddr !== 'string' || targetAddr === 'null') {
           return 0;
         }
         
@@ -164,18 +278,40 @@ export default function App() {
         const publicRpc = 'https://arb1.arbitrum.io/rpc';
         
         const fetchCall = async (contract: string) => {
-          const response = await fetch(publicRpc, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              method: 'eth_call',
-              params: [{ to: contract, data: callData }, 'latest'],
-              id: 1
-            })
-          });
-          const res = await response.json();
-          return res.result;
+          try {
+            // Prioritize authenticated provider to bypass CORS/rate-limits
+            if (provider) {
+              const res = await (provider as any).request({
+                method: 'eth_call',
+                params: [{ to: contract, data: callData }, 'latest']
+              });
+              return res || '0x';
+            }
+
+            const response = await fetch(publicRpc, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'eth_call',
+                params: [{ to: contract, data: callData }, 'latest'],
+                id: 1
+              })
+            });
+            if (!response.ok) {
+              console.warn(`[BalanceCheck] RPC error ${response.status} for ${contract}`);
+              return '0x';
+            }
+            const res = await response.json();
+            if (res.error) {
+              console.warn(`[BalanceCheck] RPC returned error for ${contract}:`, res.error);
+              return '0x';
+            }
+            return res.result || '0x';
+          } catch (e) {
+            console.error(`[BalanceCheck] Request failed for ${contract}:`, e);
+            return '0x';
+          }
         };
 
         const hexNative = await fetchCall(USDC_ADDRESS);
@@ -188,29 +324,72 @@ export default function App() {
         if (hexBridged && hexBridged !== '0x' && hexBridged.length > 10) {
           total += Number(BigInt(hexBridged)) / 10 ** USDC_E_DECIMALS;
         }
+        
+        if (total > 0) {
+          console.log(`[BalanceCheck] Found ${total.toFixed(2)} USDC at ${targetAddr}`);
+        }
         return total;
       };
 
-      // Aggregate balances from ALL detected wallets
-      let totalWalletBalance = 0;
-      const detectedWallets = userInfo.wallets || [];
+      // 1. Identify all unique addresses to scan (Smart Account, EOA, and fallbacks)
+      const scanSet = new Set<string>();
+      if (userAddress) scanSet.add(userAddress);
+      if (forcedAddress) scanSet.add(forcedAddress);
+      if (ethAddress) scanSet.add(ethAddress);
+      if (aaExtras?.biconomyAddress) scanSet.add(aaExtras.biconomyAddress);
+      if (aaExtras?.simpleAddress) scanSet.add(aaExtras.simpleAddress);
+      if ((userInfo as any).biconomyV1Address) scanSet.add((userInfo as any).biconomyV1Address);
       
-      for (const wallet of detectedWallets) {
-        if (wallet.public_address) {
-          const bal = await getBalance(wallet.public_address);
-          totalWalletBalance += bal;
+      // Manual fallback for the user-provided address
+      scanSet.add('0x3B9fB2041b5CF7CC644836E86601413680Dfacb2');
+      
+      if ((userInfo as any).public_address) scanSet.add((userInfo as any).public_address);
+      
+      // Also grab from Particle's nested wallet list
+      const pWallets = userInfo.wallets || [];
+      pWallets.forEach((w: any) => {
+        if (w.public_address && w.public_address !== 'null') scanSet.add(w.public_address);
+      });
+
+      // Check provider accounts directly as a fallback
+      if (provider) {
+        try {
+          const pAccounts = await (provider as any).request({ method: 'eth_accounts' });
+          if (pAccounts && Array.isArray(pAccounts)) {
+            pAccounts.forEach((a: string) => {
+              if (a && typeof a === 'string' && a !== 'null') scanSet.add(a);
+            });
+          }
+          
+          // Try to specifically request the smart account via Particle-specific RPC
+          try {
+            const aaAccount = await (provider as any).request({ method: 'particle_aa_getSmartAccount' });
+            if (aaAccount && typeof aaAccount === 'string') scanSet.add(aaAccount);
+            if (Array.isArray(aaAccount)) aaAccount.forEach((a: any) => {
+              if (a?.smartAccountAddress) scanSet.add(a.smartAccountAddress);
+            });
+          } catch (aaErr) {
+            // This might fail if the method isn't supported, which is fine
+          }
+        } catch (e) {
+          console.warn('[Diagnostic] Failed to fetch provider accounts:', e);
         }
       }
 
-      // If no wallets in list, check the main public_address
-      if (detectedWallets.length === 0 && (userInfo as any).public_address) {
-        totalWalletBalance = await getBalance((userInfo as any).public_address);
+      console.log(`[Diagnostic] Aggregating assets for ${scanSet.size} addresses:`, Array.from(scanSet));
+      
+      let totalWalletBalance = 0;
+      for (const addr of scanSet) {
+        if (!addr || typeof addr !== 'string' || addr.length < 20 || addr === 'null') continue;
+        const bal = await getBalance(addr);
+        console.log(`[Diagnostic] Balance for ${addr}: ${bal}`);
+        totalWalletBalance += bal;
       }
 
-      console.log(`[Diagnostic] Aggregate Wallet Balance: ${totalWalletBalance}`);
+      console.log(`[Diagnostic] Total Aggregate Wallet Balance: ${totalWalletBalance}`);
       
       // Update local address if not set
-      const primaryAddr = forcedAddress || userAddress || detectedWallets[0]?.public_address || (userInfo as any).public_address;
+      const primaryAddr = forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
       if (primaryAddr && !userAddress) setUserAddress(primaryAddr);
 
       // Fetch treasury balance if admin (check email OR wallet)
@@ -219,11 +398,7 @@ export default function App() {
         const tBal = await getBalance(PRIMARY_WALLET);
         setTreasuryBalance(tBal);
       }
-      } catch (err) {
-        console.error('Balance fetch error:', err);
-      }
 
-      try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -231,18 +406,29 @@ export default function App() {
         .single();
 
       if (data) {
-        // Source of truth is now the database (which syncs with wallet balance)
-        const finalBalance = data.balance ?? 0;
-        setBalance(finalBalance);
+        let activeBalance = Number(data.balance) || 0;
+        const lastWalletBalance = Number(data.last_wallet_balance) || 0;
+        
+        // ADDITIVE SYNC LOGIC:
+        // Instead of overwriting, we calculate the delta of the wallet since last check.
+        // This preserves in-game virtual credits (collections/buy-ins) while picking up
+        // external deposits or withdrawals.
+        if (totalWalletBalance > 0 && Math.abs(totalWalletBalance - lastWalletBalance) > 0.0001) {
+          const delta = totalWalletBalance - lastWalletBalance;
+          console.log(`[Sync] Wallet shifted by ${delta.toFixed(4)}. Updating DB balance...`);
+          activeBalance += delta;
+          updateUserData({ 
+            balance: activeBalance, 
+            last_wallet_balance: totalWalletBalance 
+          });
+        }
+        
+        // Update state with the final determined balance
+        setBalance(activeBalance);
         setHighScore(data.high_score);
         setTotalInjected(data.total_injected);
         setTotalSessions(data.total_sessions);
         setUserProfile(data);
-        
-        // Sync back to Supabase if wallet balance changed
-        if (totalWalletBalance > 0 && Math.abs(totalWalletBalance - data.balance) > 0.01) {
-          updateUserData({ balance: totalWalletBalance });
-        }
         
         // If profile doesn't have name/email, update it
         if (!data.email || !data.name || !data.wallet_address) {
@@ -250,7 +436,8 @@ export default function App() {
           updateUserData({ 
             email: userInfo.email || data.email,
             name: data.name || fallbackName,
-            wallet_address: primaryAddr || data.wallet_address
+            wallet_address: primaryAddr || data.wallet_address,
+            last_wallet_balance: totalWalletBalance // Also sync this here
           });
           // Update local state immediately
           setUserProfile({ 
@@ -269,6 +456,7 @@ export default function App() {
             email: userInfo.email,
             name: userInfo.name || 'Operator ' + userInfo.uuid.slice(0, 4),
             balance: initialBalance,
+            last_wallet_balance: initialBalance,
             high_score: 0,
             total_injected: 0,
             total_sessions: 0,
@@ -287,7 +475,9 @@ export default function App() {
         if (insertError) console.error('Error creating profile:', insertError);
       }
     } catch (err) {
-      console.error('Supabase fetch error:', err);
+      console.error('Fetch user data error:', err);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -358,6 +548,7 @@ export default function App() {
           if (result.newBalance !== undefined) setBalance(result.newBalance);
           setTotalSessions(prev => prev + 1);
           setScore(0);
+          setCurrentSessionLoot(0);
           setCurrentPage('PLAYING');
           if (!isTestMode) notify('Session Started: -$0.10', 'info');
           else notify('Test Session Started (Free)', 'info');
@@ -465,6 +656,7 @@ export default function App() {
   const handleMoneyCollect = async (amount: number, dropId?: string) => {
     // Optimistic update for immediate visual feedback
     setBalance(prev => prev + amount);
+    setCurrentSessionLoot(prev => prev + amount);
     
     // If it's a major persistent drop (has dropId), send immediately
     if (dropId) {
@@ -528,23 +720,24 @@ export default function App() {
 
   if (connectionStatus !== 'connected') {
     return (
-      <div className="relative w-full h-screen overflow-hidden bg-slate-950 text-slate-50 font-sans select-none flex flex-col items-center justify-center">
+      <div className="relative w-full h-screen overflow-hidden bg-slate-950 text-slate-50 font-sans select-none flex flex-col items-center justify-center p-0 md:p-6">
         <div className="absolute inset-0 z-0 opacity-20"
              style={{
                backgroundImage: 'radial-gradient(circle at 50% 50%, #38bdf8 0%, transparent 50%)',
                filter: 'blur(100px)'
              }}></div>
         
-        <div className="max-w-md w-full text-center space-y-8 p-12 relative overflow-hidden bg-slate-900/40 backdrop-blur-2xl rounded-3xl shadow-2xl">
+        <div className="w-full h-full md:h-auto md:max-w-md text-center space-y-8 p-8 md:p-12 relative overflow-hidden bg-slate-900/40 backdrop-blur-2xl md:rounded-3xl shadow-2xl flex flex-col justify-center">
           <div className="relative z-10">
-            <h2 className="text-6xl font-black italic tracking-tighter text-white mb-2 leading-none">SYSTEM<br/>ACCESS</h2>
-            <p className="text-sky-400 font-mono text-sm uppercase tracking-widest">Secure Web3 Identity</p>
+            <h2 className="text-5xl md:text-6xl font-black italic tracking-tighter text-white mb-2 leading-none uppercase">System<br/>Access</h2>
+            <p className="text-sky-400 font-mono text-sm uppercase tracking-[0.3em]">Secure Web3 Identity</p>
           </div>
           
-          <div className="relative z-10 w-full mt-8 space-y-4 font-mono">
+          <div className="relative z-10 w-full mt-8 space-y-4 font-mono max-w-sm mx-auto">
             {connectionStatus === 'loading' ? (
-               <div className="py-12 flex items-center justify-center">
-                  <div className="w-12 h-12 rounded-full animate-spin"></div>
+               <div className="py-12 flex flex-col items-center justify-center gap-4">
+                  <div className="w-12 h-12 border-4 border-sky-500/20 border-t-sky-500 rounded-full animate-spin"></div>
+                  <span className="text-[10px] text-sky-500 animate-pulse">AUTHORIZING NODE...</span>
                </div>
             ) : (
               <>
@@ -555,28 +748,29 @@ export default function App() {
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
                     placeholder="Enter secure email..." 
-                    className="w-full bg-slate-950/50 p-4 pl-12 text-sm text-white focus:outline-none transition-all rounded-xl"
+                    className="w-full bg-slate-950/50 p-5 pl-12 text-sm text-white focus:outline-none transition-all rounded-2xl"
                   />
                 </div>
                 
                 <button 
                   disabled={isProcessing}
                   onClick={() => connect({ email: emailInput })}
-                  className="w-full py-4 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-sm uppercase transition-all rounded-xl shadow-lg shadow-sky-500/20 active:scale-[0.98] disabled:opacity-50"
+                  className="w-full py-5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm uppercase transition-all rounded-2xl shadow-lg shadow-sky-500/20 active:scale-[0.98] disabled:opacity-50"
                 >
                   {isProcessing ? 'Authorizing...' : 'Authenticate Wallet'}
                 </button>
 
-                <div className="flex items-center gap-4 text-slate-500 text-xs uppercase py-2">
-                  <div className="flex-1 h-px bg-slate-800"></div>
+                <div className="flex items-center gap-4 text-slate-500 text-[10px] uppercase py-2 font-black tracking-widest">
+                  <div className="flex-1 h-[1px] bg-slate-800"></div>
                   <span>OR</span>
-                  <div className="flex-1 h-px bg-slate-800"></div>
+                  <div className="flex-1 h-[1px] bg-slate-800"></div>
                 </div>
 
                 <button 
                   onClick={() => connect({ socialType: 'google' })}
-                  className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-sky-400 font-bold text-sm uppercase transition-all rounded-xl flex items-center justify-center gap-2"
+                  className="w-full py-5 bg-slate-800/50 hover:bg-slate-800 text-white font-black text-sm uppercase transition-all rounded-2xl flex items-center justify-center gap-3"
                 >
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="G" />
                   Continue with Google
                 </button>
               </>
@@ -588,97 +782,122 @@ export default function App() {
   }
 
   return (
-    <div className="relative w-full h-screen overflow-hidden bg-slate-950 text-slate-50 font-sans select-none flex">
-      {/* Sidebar Navigation */}
-      <nav className="w-24 lg:w-64 h-full bg-slate-900/50 backdrop-blur-xl flex flex-col items-center lg:items-stretch p-6 gap-8 z-50 shadow-2xl">
-        <div className="flex items-center gap-4 px-2">
-          <div className="w-10 h-10 bg-sky-500 rounded-xl flex-shrink-0 flex items-center justify-center shadow-lg shadow-sky-500/30">
-            <Zap className="text-slate-950 w-6 h-6" />
-          </div>
-          <h1 className="text-xl font-black tracking-tighter text-white hidden lg:block uppercase">Slither Dash v2</h1>
-        </div>
+    <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-sky-500/30 overflow-x-hidden">
+      {/* Background Ambience */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-sky-500/10 rounded-full blur-[120px] animate-pulse"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 rounded-full blur-[120px] animate-pulse delay-700"></div>
+      </div>
 
-        <div className="flex-1 flex flex-col gap-2">
-          <button
-            onClick={() => setCurrentPage('HOME')}
-            className={`flex items-center gap-4 p-4 rounded-2xl transition-all group ${
-              currentPage === 'HOME' 
-                ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20' 
-                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <LayoutDashboard className="w-6 h-6" />
-            <span className="font-bold text-sm uppercase hidden lg:block">Terminal</span>
-          </button>
-        </div>
-
-        <div className="mt-auto space-y-4">
-          <div className="p-4 bg-slate-800/50 rounded-2xl hidden lg:block group relative">
-            <div className="flex flex-col">
-              <div className="flex items-center justify-between">
-                <span className="text-sky-500/60 text-[10px] uppercase font-bold tracking-widest mb-1">Balance</span>
-                <button 
-                  onClick={() => setIsBalanceVisible(!isBalanceVisible)}
-                  className="text-slate-500 hover:text-sky-400 transition-colors"
-                >
-                  {isBalanceVisible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                </button>
-              </div>
-              <span className="text-xl text-white font-black">
-                {isBalanceVisible ? `$${(balance || 0).toFixed(2)}` : '••••••'}
-              </span>
+      {/* Premium Top Navigation */}
+      <header className="sticky top-0 z-[160] premium-glass px-6 md:px-12 py-5 flex items-center justify-between border-none">
+        <div className="flex items-center gap-10">
+          <div className="flex items-center gap-4 group cursor-pointer" onClick={() => setCurrentPage('HOME')}>
+            <div className="w-12 h-12 bg-sky-500 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-500/20 group-hover:rotate-12 transition-all duration-500">
+              <Zap className="text-slate-950 w-6 h-6 fill-current" />
             </div>
+            <h1 className="text-2xl md:text-3xl font-black italic tracking-tighter premium-gradient-text uppercase">Slider</h1>
           </div>
-          <button 
-            onClick={handleLogout}
-            disabled={isProcessing}
-            className="w-full flex items-center justify-center lg:justify-start gap-4 p-4 text-red-400 hover:bg-red-500/10 rounded-2xl transition-all disabled:opacity-50"
-          >
-            <X className="w-6 h-6" />
-            <span className="font-bold text-sm uppercase hidden lg:block">
-              {isProcessing ? 'Clearing...' : 'Disconnect'}
-            </span>
-          </button>
-        </div>
-      </nav>
 
-      {/* Main Content Area */}
-      <main className="flex-1 relative overflow-y-auto bg-slate-950 p-6 lg:p-12">
+          <nav className="hidden md:flex items-center gap-2">
+            <button 
+              onClick={() => setCurrentPage('HOME')}
+              className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${currentPage === 'HOME' ? 'bg-sky-500/10 text-sky-400' : 'text-slate-500 hover:text-white'}`}
+            >
+              Lobby
+            </button>
+            <button 
+              onClick={() => setIsWalletOpen(true)}
+              className="px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest text-slate-500 hover:text-white transition-all"
+            >
+              Vault
+            </button>
+            <button 
+              onClick={() => setCurrentPage('PROFILE')}
+              className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${currentPage === 'PROFILE' ? 'bg-sky-500/10 text-sky-400' : 'text-slate-500 hover:text-white'}`}
+            >
+              Master
+            </button>
+          </nav>
+        </div>
+
+        <div className="flex items-center gap-4">
+           {userAddress ? (
+             <div className="flex items-center gap-4">
+                <div className="hidden lg:block premium-glass px-4 py-2 rounded-2xl border-none">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Balance</span>
+                    <span className="text-sm font-black text-white italic">${Number(balance || 0).toFixed(2)}</span>
+                  </div>
+                </div>
+               <button 
+                 onClick={() => setCurrentPage('PROFILE')}
+                 className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center hover:bg-slate-700 transition-all active:scale-90 border-none shadow-xl"
+               >
+                 <User className="text-sky-400 w-5 h-5" />
+               </button>
+             </div>
+           ) : (
+             <button 
+               onClick={login}
+               disabled={isProcessing}
+               className="px-8 py-4 bg-sky-500 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-sky-400 transition-all shadow-lg shadow-sky-500/20 active:scale-95 border-none"
+             >
+               Authorize Node
+             </button>
+           )}
+        </div>
+      </header>
+
+      {/* Main Content Area - Full Width Optimization */}
+      <main className="flex-1 relative z-10 w-full max-w-[1500px] mx-auto p-4 md:p-12 lg:p-16 space-y-12 pb-32 md:pb-16">
         {currentPage === 'HOME' && (
           <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             {/* Profile & Identity Section */}
-            <div className="flex flex-col md:flex-row items-center justify-between gap-8 p-8 bg-slate-900 rounded-3xl shadow-xl">
-               <div className="flex items-center gap-6">
-                  <div className="w-20 h-20 bg-sky-500 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-500/20">
-                    <User className="w-10 h-10 text-slate-950" />
+            {/* Profile & Identity Section - Optimized for Mobile */}
+            <div className="relative group premium-glass rounded-[2rem] md:rounded-[3rem] overflow-hidden">
+               <div className="absolute inset-0 bg-gradient-to-br from-sky-500/10 via-transparent to-transparent"></div>
+               <div className="relative flex flex-col md:flex-row items-center justify-between gap-6 p-6 md:p-10">
+                  <div className="flex items-center gap-5 md:gap-8">
+                     <div className="relative">
+                        <div className="w-16 h-16 md:w-24 md:h-24 bg-sky-500 rounded-[1.5rem] md:rounded-[2rem] flex items-center justify-center shadow-2xl shadow-sky-500/30">
+                           <User className="w-8 h-8 md:w-12 md:h-12 text-slate-950" />
+                        </div>
+                        <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-emerald-500 rounded-full border-[3px] border-slate-900 animate-pulse"></div>
+                     </div>
+                     <div className="space-y-1">
+                        <h3 className="text-xl md:text-3xl font-black text-white uppercase italic tracking-tighter premium-gradient-text">
+                           {userProfile?.name || userInfo?.name || (userInfo?.email ? userInfo.email.split('@')[0] : 'Anonymous Operator')}
+                        </h3>
+                        <p className="text-sky-400/80 font-mono text-[10px] md:text-sm uppercase tracking-widest font-black">
+                           {userProfile?.email || userInfo?.email || (userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'unlinked@system.node')}
+                        </p>
+                     </div>
                   </div>
-                  <div>
-                    <h3 className="text-2xl font-black text-white uppercase">
-                      {userProfile?.name || userInfo?.name || (userInfo?.email ? userInfo.email.split('@')[0] : 'Anonymous Operator')}
-                    </h3>
-                    <p className="text-sky-400 font-mono text-sm">
-                      {userProfile?.email || userInfo?.email || (userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'unlinked@system.node')}
-                    </p>
+                  
+                  <div className="flex w-full md:w-auto items-center gap-3 md:gap-4 overflow-x-auto no-scrollbar pb-2 md:pb-0">
+                     <button onClick={fetchUserData} className="flex-1 md:flex-none flex items-center justify-center gap-3 px-6 py-4 bg-slate-800/60 hover:bg-slate-700 text-sky-400 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl border-none">
+                        <RefreshCw className={`w-4 h-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                        <span>SYNC</span>
+                     </button>
+                     <button 
+                        disabled={isProcessing}
+                        onClick={() => setIsDepositWizardOpen(true)}
+                        className="flex-1 md:flex-none flex items-center justify-center gap-3 px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-emerald-500/20 disabled:opacity-50 border-none"
+                     >
+                        <PlusCircle className="w-4 h-4" />
+                        <span>TOPUP</span>
+                     </button>
+                     <button onClick={() => setIsWalletOpen(true)} className="flex-1 md:flex-none flex items-center justify-center gap-3 px-6 py-4 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-sky-500/20 border-none">
+                        <Wallet className="w-4 h-4" />
+                        <span>WALLET</span>
+                     </button>
+                     {/* Mobile Quick Logout */}
+                     <button onClick={handleLogout} className="md:hidden flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 border-none">
+                        <X className="w-4 h-4" />
+                        <span>EXIT</span>
+                     </button>
                   </div>
-               </div>
-               
-               <div className="flex flex-wrap gap-4">
-                  <button onClick={fetchUserData} className="flex items-center gap-3 px-6 py-4 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-2xl font-bold transition-all active:scale-95 shadow-lg">
-                    <RefreshCw className={`w-5 h-5 ${isProcessing ? 'animate-spin' : ''}`} />
-                    <span>REFRESH</span>
-                  </button>
-                  <button 
-                    disabled={isProcessing}
-                    onClick={() => setIsDepositWizardOpen(true)}
-                    className="flex items-center gap-3 px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-2xl font-bold transition-all active:scale-95 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
-                  >
-                    <PlusCircle className="w-5 h-5" />
-                    <span>DEPOSIT</span>
-                  </button>
-                  <button onClick={() => setIsWalletOpen(true)} className="flex items-center gap-3 px-6 py-4 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-2xl font-bold transition-all active:scale-95 shadow-lg shadow-sky-500/20">
-                    <Wallet className="w-5 h-5" />
-                    <span>WALLET</span>
-                  </button>
                </div>
             </div>
 
@@ -686,52 +905,55 @@ export default function App() {
               {/* Admin Treasury Dashboard - Check email OR specific admin wallet */}
               {(userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || 
                 userAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') && (
-                <div className="p-10 bg-gradient-to-br from-purple-900/60 to-slate-900/60 rounded-[40px] border border-purple-500/30 backdrop-blur-2xl shadow-2xl relative overflow-hidden group">
-                  <div className="absolute -top-24 -right-24 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl group-hover:bg-purple-500/20 transition-all" />
+              {/* Admin Treasury Dashboard - Optimized for Mobile */}
+              {(userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || 
+                userAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') && (
+                <div className="p-6 md:p-12 bg-gradient-to-br from-purple-900/40 via-slate-900/60 to-slate-950/80 rounded-[2.5rem] md:rounded-[4rem] backdrop-blur-3xl shadow-2xl relative overflow-hidden group border-none">
+                  <div className="absolute -top-24 -right-24 w-96 h-96 bg-purple-500/10 rounded-full blur-[120px] group-hover:bg-purple-500/20 transition-all duration-1000" />
                   
-                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-10 relative z-10">
-                    <div>
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className="bg-purple-500 p-1.5 rounded-lg shadow-lg shadow-purple-500/20">
-                          <Crown className="text-white w-5 h-5" />
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-12 relative z-10">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-purple-500 p-2 rounded-xl shadow-lg shadow-purple-500/20">
+                          <Crown className="text-white w-5 h-5 md:w-6 md:h-6" />
                         </div>
-                        <h3 className="text-2xl font-black text-white tracking-tight uppercase italic">House Treasury</h3>
+                        <h3 className="text-xl md:text-3xl font-black text-white tracking-tighter uppercase italic premium-gradient-text">House Treasury</h3>
                       </div>
-                      <p className="text-sm text-purple-300 font-medium opacity-80">Global Economic Controller • Arbitrum One</p>
+                      <p className="text-[10px] md:text-xs text-purple-400 font-black uppercase tracking-[0.3em] opacity-60">Global Economic Controller • Arbitrum One</p>
                     </div>
-                    <div className="flex items-center gap-4 bg-purple-500/10 border border-purple-500/20 px-5 py-2.5 rounded-2xl backdrop-blur-md">
-                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                      <span className="text-xs font-bold text-purple-200 uppercase tracking-[0.2em]">System Status: Operational</span>
+                    <div className="flex items-center gap-4 bg-purple-500/10 px-5 py-3 rounded-2xl backdrop-blur-md border-none">
+                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_10px_rgba(74,222,128,0.5)]" />
+                      <span className="text-[10px] font-black text-purple-200 uppercase tracking-[0.2em]">System: Operational</span>
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 relative z-10">
-                    <div className="space-y-2">
-                      <span className="text-[11px] font-black text-purple-400/60 uppercase tracking-[0.3em]">Vault Liquidity</span>
-                      <div className="text-7xl font-black text-white tracking-tighter italic flex items-baseline gap-4">
-                        ${treasuryBalance.toFixed(2)}
-                        <span className="text-xl not-italic font-bold text-slate-500 tracking-normal uppercase">USDC</span>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-10 relative z-10">
+                    <div className="space-y-4">
+                      <span className="text-[11px] font-black text-purple-400/60 uppercase tracking-[0.4em]">Vault Liquidity</span>
+                      <div className="text-4xl md:text-8xl font-black text-white tracking-tighter italic flex items-baseline gap-3 md:gap-5">
+                        ${Number(treasuryBalance || 0).toFixed(2)}
+                        <span className="text-lg md:text-3xl not-italic font-bold text-slate-500 tracking-normal uppercase">USDC</span>
                       </div>
-                      <p className="text-xs text-slate-500 font-medium max-w-xs">Total available liquidity for real-time player payouts and field orb maintenance.</p>
+                      <p className="text-xs md:text-sm text-slate-400 font-medium max-w-sm leading-relaxed">Active liquidity buffer for real-time player payouts and automated orb distribution protocols.</p>
                     </div>
                     
-                    <div className="bg-white/5 rounded-[32px] border border-white/10 p-8 hover:bg-white/10 transition-all flex flex-col md:flex-row items-center gap-8 group/card">
-                       <div className="bg-white p-3 rounded-2xl shadow-2xl shadow-white/10 group-hover/card:scale-105 transition-transform">
-                          <QRCodeCanvas value={PRIMARY_WALLET} size={100} />
+                    <div className="bg-white/5 rounded-[2.5rem] p-6 md:p-10 hover:bg-white/10 transition-all flex flex-col lg:flex-row items-center gap-8 group/card border-none">
+                       <div className="bg-white p-4 rounded-[2rem] shadow-2xl shadow-white/10 group-hover/card:scale-105 transition-transform duration-500 flex-shrink-0">
+                          <QRCodeCanvas value={PRIMARY_WALLET} size={120} />
                        </div>
-                       <div className="flex-1 text-center md:text-left space-y-4">
-                          <div>
-                            <span className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] block mb-2">Primary Field Address</span>
-                            <p className="text-xs font-mono text-slate-300 break-all leading-relaxed bg-black/40 p-3 rounded-xl border border-white/5">{PRIMARY_WALLET}</p>
+                       <div className="flex-1 text-center lg:text-left space-y-6">
+                          <div className="space-y-2">
+                            <span className="text-[11px] font-black text-slate-500 uppercase tracking-[0.4em] block">Field Address</span>
+                            <p className="text-[10px] md:text-xs font-mono text-sky-400 break-all leading-relaxed bg-black/40 p-4 rounded-2xl border-none">{PRIMARY_WALLET}</p>
                           </div>
                           <button 
                             onClick={() => {
                               navigator.clipboard.writeText(PRIMARY_WALLET);
-                              notify('Treasury address copied to clipboard', 'success');
+                              notify('Treasury address copied', 'success');
                             }}
-                            className="w-full md:w-auto px-8 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-lg shadow-purple-600/20 active:scale-95"
+                            className="w-full lg:w-auto px-10 py-4 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all shadow-xl shadow-purple-600/20 active:scale-95 border-none"
                           >
-                            Copy Deposit Address
+                            Copy Deposit Node
                           </button>
                        </div>
                     </div>
@@ -740,29 +962,32 @@ export default function App() {
               )}
             </div>
 
-            {/* Performance Analytics */}
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-              <div className="lg:col-span-2 p-8 bg-slate-900 rounded-3xl space-y-4 shadow-xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-5">
-                   <TrendingUp className="w-32 h-32" />
+            {/* Performance Analytics - Optimized Grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8">
+              <div className="col-span-2 p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] space-y-4 md:space-y-6 shadow-2xl relative overflow-hidden group border-none">
+                <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
+                   <TrendingUp className="w-32 h-32 md:w-48 md:h-48" />
                 </div>
-                <p className="text-sky-400 font-mono text-xs uppercase tracking-widest">Gross Profit/Loss</p>
-                <div className={`text-6xl font-black flex items-center gap-4 ${isProfitable ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {isProfitable ? <TrendingUp className="w-12 h-12" /> : <TrendingDown className="w-12 h-12" />}
-                  {Math.abs(pnl).toFixed(2)} USDC
+                <div className="relative z-10 space-y-2">
+                   <p className="text-sky-400 font-mono text-[10px] md:text-xs uppercase tracking-[0.3em] font-black">Gross Performance</p>
+                   <div className={`text-3xl md:text-6xl font-black flex items-center gap-3 md:gap-5 italic tracking-tighter ${isProfitable ? 'text-emerald-400' : 'text-red-400'}`}>
+                     {isProfitable ? <TrendingUp className="w-8 h-8 md:w-14 md:h-14" /> : <TrendingDown className="w-8 h-8 md:w-14 md:h-14" />}
+                     {Number(Math.abs(pnl) || 0).toFixed(2)} <span className="text-lg md:text-3xl font-bold not-italic text-slate-500 uppercase tracking-normal">USDC</span>
+                   </div>
                 </div>
-                <div className="pt-4 flex gap-4">
-                  <div className="flex-1 p-4 bg-slate-950/50 rounded-2xl">
-                    <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Injected</p>
-                    <p className="text-xl font-bold">{totalInjected.toFixed(2)} USDC</p>
+                
+                <div className="pt-4 grid grid-cols-2 gap-3 md:gap-6 relative z-10">
+                  <div className="p-4 md:p-6 bg-slate-950/40 rounded-2xl md:rounded-3xl border-none">
+                    <p className="text-slate-500 text-[9px] md:text-[11px] uppercase font-black mb-1 tracking-widest">Wagered</p>
+                    <p className="text-lg md:text-2xl font-black italic text-white tracking-tighter">{Number(totalInjected || 0).toFixed(2)}</p>
                   </div>
-                  <div className="flex-1 p-4 bg-slate-950/50 rounded-2xl">
-                    <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Current</p>
+                  <div className="p-4 md:p-6 bg-slate-950/40 rounded-2xl md:rounded-3xl border-none">
+                    <p className="text-slate-500 text-[9px] md:text-[11px] uppercase font-black mb-1 tracking-widest">Available</p>
                     <div className="flex items-center justify-between">
-                      <p className="text-xl font-bold text-white">
-                        {isBalanceVisible ? `$${balance.toFixed(2)}` : '••••••'}
+                      <p className="text-lg md:text-2xl font-black italic text-white tracking-tighter">
+                        {isBalanceVisible ? `${Number(balance || 0).toFixed(2)}` : '••••'}
                       </p>
-                      <button onClick={() => setIsBalanceVisible(!isBalanceVisible)} className="text-slate-600 hover:text-sky-400">
+                      <button onClick={() => setIsBalanceVisible(!isBalanceVisible)} className="text-slate-600 hover:text-sky-400 transition-colors">
                         {isBalanceVisible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                       </button>
                     </div>
@@ -770,16 +995,26 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="p-8 bg-slate-900 rounded-3xl flex flex-col justify-between shadow-xl">
-                <p className="text-sky-400 font-mono text-xs uppercase tracking-widest">Total Sessions</p>
-                <div className="text-6xl font-black text-white">{totalSessions}</div>
-                <div className="text-[10px] text-slate-500 uppercase tracking-widest">Active Runtime</div>
+              <div className="p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] flex flex-col justify-between shadow-2xl group border-none">
+                <div className="space-y-1">
+                   <p className="text-sky-400 font-mono text-[10px] md:text-xs uppercase tracking-[0.2em] font-black">Runtime</p>
+                   <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black opacity-60">Sessions</p>
+                </div>
+                <div className="text-5xl md:text-8xl font-black text-white italic tracking-tighter group-hover:scale-105 transition-transform duration-500">{totalSessions}</div>
+                <div className="h-1.5 w-full bg-slate-950/50 rounded-full overflow-hidden mt-4">
+                   <div className="h-full bg-sky-500/50 w-2/3"></div>
+                </div>
               </div>
 
-              <div className="p-8 bg-slate-900 rounded-3xl flex flex-col justify-between shadow-xl">
-                <p className="text-sky-400 font-mono text-xs uppercase tracking-widest">Best Mass</p>
-                <div className="text-6xl font-black text-yellow-400">{Math.floor(highScore)}</div>
-                <div className="text-[10px] text-slate-500 uppercase tracking-widest">Geometric Peak</div>
+              <div className="p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] flex flex-col justify-between shadow-2xl group border-none">
+                <div className="space-y-1">
+                   <p className="text-yellow-400 font-mono text-[10px] md:text-xs uppercase tracking-[0.2em] font-black">Dominance</p>
+                   <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black opacity-60">Max Mass</p>
+                </div>
+                <div className="text-5xl md:text-8xl font-black text-yellow-400 italic tracking-tighter group-hover:scale-105 transition-transform duration-500">{Math.floor(highScore)}</div>
+                <div className="h-1.5 w-full bg-slate-950/50 rounded-full overflow-hidden mt-4">
+                   <div className="h-full bg-yellow-500/50 w-1/2"></div>
+                </div>
               </div>
             </div>
 
@@ -787,53 +1022,52 @@ export default function App() {
             <div className="pt-4 pb-12">
               <button 
                 onClick={startGame}
-                className="group relative w-full min-h-[400px] bg-slate-900 rounded-[3rem] overflow-hidden text-left transition-all hover:scale-[1.01] active:scale-[0.99] shadow-2xl border-none"
+                className="group relative w-full min-h-[400px] md:min-h-[500px] premium-glass rounded-[3rem] overflow-hidden text-left transition-all hover:scale-[1.01] active:scale-[0.99] shadow-2xl border-none premium-card-hover shimmer"
               >
                 {/* Background Layering */}
-                <div className="absolute inset-0 bg-gradient-to-br from-sky-500/20 via-slate-900 to-slate-950"></div>
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20 mix-blend-overlay"></div>
+                <div className="absolute inset-0 bg-gradient-to-br from-sky-500/20 via-slate-900/40 to-slate-950/60"></div>
                 
                 {/* Animated Orbs */}
-                <div className="absolute -right-20 -top-20 w-96 h-96 bg-sky-500/20 rounded-full blur-[120px] group-hover:bg-sky-500/30 transition-all duration-1000"></div>
+                <div className="absolute -right-20 -top-20 w-96 h-96 bg-sky-500/20 rounded-full blur-[120px] group-hover:bg-sky-500/40 transition-all duration-1000"></div>
                 <div className="absolute -left-20 -bottom-20 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px] group-hover:bg-blue-600/20 transition-all duration-1000"></div>
                 
-                <div className="relative p-12 lg:p-16 h-full flex flex-col justify-between">
-                  <div className="space-y-6">
+                <div className="relative p-10 md:p-20 h-full flex flex-col justify-between">
+                  <div className="space-y-8">
                     <div className="flex items-center gap-4">
-                       <div className="px-4 py-1.5 bg-sky-500/20 rounded-full backdrop-blur-md">
-                          <span className="text-sky-400 font-mono text-xs uppercase font-bold tracking-[0.2em]">Live Protocol</span>
+                       <div className="px-5 py-2 bg-sky-500/20 rounded-full backdrop-blur-xl border-none">
+                          <span className="text-sky-400 font-mono text-[10px] uppercase font-black tracking-[0.3em]">Protocol Active</span>
                        </div>
-                       <div className="px-4 py-1.5 bg-yellow-500/20 rounded-full backdrop-blur-md">
-                          <span className="text-yellow-400 font-mono text-xs uppercase font-bold tracking-[0.2em]">$0.10 ENTRY</span>
+                       <div className="px-5 py-2 bg-yellow-500/20 rounded-full backdrop-blur-xl border-none">
+                          <span className="text-yellow-400 font-mono text-[10px] uppercase font-black tracking-[0.3em]">$0.10 WAGER</span>
                        </div>
                     </div>
                     
-                    <div className="space-y-2">
-                      <h2 className="text-6xl lg:text-8xl font-black italic tracking-tighter text-white leading-[0.9] uppercase">
+                    <div className="space-y-4">
+                      <h2 className="text-6xl md:text-9xl font-black italic tracking-tighter text-white leading-[0.85] uppercase">
                         NEON<br/>
-                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-sky-400">SLITHER</span>
+                        <span className="premium-gradient-text">SLITHER</span>
                       </h2>
-                      <p className="max-w-xl text-slate-400 text-lg lg:text-xl font-medium leading-relaxed">
-                        Survive the digital void. Consume data nodes, outmaneuver rival protocols, and ascend to the peak of the arcade matrix.
+                      <p className="max-w-xl text-slate-400 text-sm md:text-2xl font-medium leading-relaxed opacity-80">
+                        Survive the digital void. Consume data nodes and outmaneuver rival protocols to dominate the matrix.
                       </p>
                     </div>
                   </div>
                   
-                  <div className="flex items-center gap-8 pt-12">
-                    <div className="px-10 py-5 bg-sky-500 text-slate-950 rounded-2xl font-black text-2xl uppercase tracking-tighter shadow-2xl shadow-sky-500/40 group-hover:bg-sky-400 group-hover:scale-105 transition-all duration-300 flex items-center gap-4">
-                      <Play className={`w-8 h-8 fill-current ${isProcessing ? 'animate-pulse' : ''}`} />
+                  <div className="flex flex-col md:flex-row items-start md:items-center gap-8 pt-12">
+                    <div className="px-12 py-6 bg-sky-500 text-slate-950 rounded-[2rem] font-black text-2xl md:text-3xl uppercase tracking-tighter shadow-2xl shadow-sky-500/40 group-hover:bg-sky-400 group-hover:scale-105 transition-all duration-500 flex items-center gap-5 border-none">
+                      <Play className={`w-8 h-8 md:w-10 md:h-10 fill-current ${isProcessing ? 'animate-pulse' : ''}`} />
                       {isProcessing ? 'AUTHORIZING...' : 'START SESSION'}
                     </div>
-                    <div className="flex flex-col">
-                      <span className="text-slate-500 font-mono text-[10px] uppercase tracking-widest">Est. Potential</span>
-                      <span className="text-emerald-400 font-black text-xl">HIGH RETURN</span>
+                    <div className="flex flex-col space-y-1">
+                      <span className="text-slate-500 font-mono text-[10px] uppercase tracking-[0.3em] font-black">Economic Yield</span>
+                      <span className="text-emerald-400 font-black text-2xl italic">HIGH VOLATILITY</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Decorative Elements */}
-                <div className="absolute right-12 bottom-12 opacity-10 group-hover:opacity-20 transition-opacity">
-                   <Gamepad2 className="w-48 h-48 text-white rotate-12" />
+                <div className="absolute right-12 bottom-12 opacity-5 group-hover:opacity-10 transition-opacity hidden md:block">
+                   <Gamepad2 className="w-64 h-64 text-white rotate-12" />
                 </div>
               </button>
               
@@ -860,81 +1094,119 @@ export default function App() {
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {currentPage === 'PLAYING' && (
-          <div className="fixed inset-0 z-[100] bg-slate-950">
-            {/* Unified HUD */}
-            <div className="absolute top-0 left-0 right-0 z-[110] px-6 py-4 md:px-8 md:py-6 flex flex-col md:flex-row items-start md:items-center justify-between pointer-events-none gap-4">
-              <div className="flex items-center gap-4 md:gap-6 pointer-events-auto">
-                <button 
-                  onClick={() => setCurrentPage('HOME')}
-                  className="p-3 md:p-4 bg-slate-900/50 hover:bg-slate-800 text-white rounded-xl md:rounded-2xl backdrop-blur-xl transition-all shadow-xl group"
-                >
-                  <X className="w-5 h-5 md:w-6 md:h-6 group-hover:scale-110 transition-transform" />
-                </button>
-                
-                <div className="flex flex-col">
-                  <span className="text-sky-500/60 font-mono text-[8px] md:text-[10px] uppercase tracking-[0.2em] font-bold">Protocol</span>
-                  <span className="text-xs md:text-sm font-black text-white uppercase tracking-tighter">{selectedGame} ACTIVE</span>
+              {currentPage === 'PROFILE' && (
+          <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="premium-glass rounded-[3rem] p-10 md:p-16 space-y-12 relative overflow-hidden border-none">
+              <div className="absolute top-0 right-0 p-8 opacity-5">
+                <User className="w-64 h-64" />
+              </div>
+              
+              <div className="flex flex-col items-center text-center space-y-6 relative z-10">
+                <div className="w-32 h-32 bg-sky-500 rounded-[2.5rem] flex items-center justify-center shadow-2xl shadow-sky-500/40 relative">
+                   <User className="w-16 h-16 text-slate-950" />
+                   <div className="absolute -top-2 -right-2 bg-yellow-400 text-slate-950 p-2 rounded-xl shadow-lg rotate-12">
+                      <Crown className="w-5 h-5" />
+                   </div>
+                </div>
+                <div className="space-y-2">
+                  <h2 className="text-4xl md:text-6xl font-black italic premium-gradient-text uppercase tracking-tighter">
+                    {userProfile?.name || 'Operator Node'}
+                  </h2>
+                  <p className="text-sky-400 font-mono text-sm tracking-[0.3em] font-black uppercase">Level 1 Protocol Master</p>
                 </div>
               </div>
 
-              {selectedGame === 'SLITHER' && (
-                <div className="flex items-center gap-6 md:gap-12 bg-slate-900/40 backdrop-blur-2xl px-6 md:px-12 py-3 md:py-4 rounded-2xl md:rounded-3xl shadow-2xl pointer-events-auto">
-                  <div className="flex flex-col items-center">
-                    <span className="text-sky-500/60 font-mono text-[8px] md:text-[10px] uppercase tracking-[0.2em] font-bold">Current Mass</span>
-                    <span className="text-2xl md:text-4xl font-black italic tracking-tighter text-white leading-none">{Math.floor(score)}</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
+                <div className="p-8 bg-slate-950/40 rounded-[2rem] space-y-4 border-none">
+                  <div className="flex items-center gap-3 text-slate-500">
+                    <Mail className="w-4 h-4" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Secure Identity</span>
                   </div>
-                  <div className="w-px h-6 md:h-8 bg-slate-800"></div>
-                  <div className="flex flex-col items-center">
-                    <span className="text-yellow-500/60 font-mono text-[8px] md:text-[10px] uppercase tracking-[0.2em] font-bold">Geometric Peak</span>
-                    <span className="text-xl md:text-2xl font-black italic tracking-tighter text-yellow-400 leading-none">{highScore}</span>
+                  <p className="text-white font-bold truncate">{userProfile?.email || 'N/A'}</p>
+                </div>
+                <div className="p-8 bg-slate-950/40 rounded-[2rem] space-y-4 border-none">
+                  <div className="flex items-center gap-3 text-slate-500">
+                    <Target className="w-4 h-4" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Protocol Address</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="text-white font-mono text-xs truncate flex-1">{userAddress}</p>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(userAddress);
+                        notify('Address copied', 'success');
+                      }}
+                      className="text-sky-400 hover:text-white transition-colors"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
-              )}
-
-              {/* Spacer for desktop layout balance */}
-              <div className="hidden md:block w-48"></div>
-            </div>
-
-            {/* Credits HUD - Bottom on mobile, Top-Right on desktop */}
-            <div className="fixed bottom-6 right-6 md:top-6 md:right-8 md:bottom-auto z-[120] flex items-center gap-4 bg-slate-900/40 backdrop-blur-2xl p-2 pl-4 md:pl-6 rounded-xl md:rounded-2xl shadow-2xl pointer-events-auto">
-              <div className="flex flex-col items-end">
-                <span className="text-sky-500/60 font-mono text-[8px] md:text-[10px] uppercase tracking-[0.2em] font-bold">Available Credits</span>
-                <span className="text-sm md:text-xl font-black italic tracking-tighter text-white">
-                  {isBalanceVisible ? `${balance.toFixed(2)} USDC` : '•••• USDC'}
-                </span>
               </div>
-              <button 
-                onClick={() => setIsBalanceVisible(!isBalanceVisible)}
-                className="w-8 h-8 md:w-10 md:h-10 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-sky-500/20 transition-all"
-              >
-                {isBalanceVisible ? <Coins className="w-4 h-4 md:w-5 md:h-5" /> : <EyeOff className="w-4 h-4 md:w-5 md:h-5" />}
-              </button>
-            </div>
 
-            
-            {selectedGame === 'SLITHER' && (
-              <Game
-                onGameOver={handleGameOver}
-                onScoreUpdate={setScore}
-                onMoneyCollect={handleMoneyCollect}
-                userProfile={userProfile}
-                isTestMode={isTestMode}
-              />
-            )}
+              <div className="pt-8 space-y-6 relative z-10">
+                <h4 className="text-xs font-black text-slate-500 uppercase tracking-[0.4em] text-center">Identity Configuration</h4>
+                <div className="grid grid-cols-1 gap-4">
+                  <button 
+                    onClick={() => setIsWalletOpen(true)}
+                    className="w-full py-6 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-[0.98] border-none shadow-xl flex items-center justify-center gap-3"
+                  >
+                    <Wallet className="w-5 h-5" />
+                    Manage Wallets
+                  </button>
+                  <button 
+                    onClick={handleLogout}
+                    className="w-full py-6 bg-red-500 text-slate-950 hover:bg-red-400 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-[0.98] border-none shadow-lg shadow-red-500/20 flex items-center justify-center gap-3"
+                  >
+                    <X className="w-5 h-5" />
+                    Terminate Session
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>
 
+      {/* Mobile Bottom Navigation - Enhanced Aesthetics */}
+      <nav className="fixed bottom-0 left-0 right-0 z-[150] premium-glass px-8 py-6 flex items-center justify-between md:hidden shadow-[0_-20px_50px_-20px_rgba(0,0,0,0.8)] rounded-t-[2.5rem] border-none">
+        <button 
+          onClick={() => setCurrentPage('HOME')}
+          className={`flex flex-col items-center gap-2 transition-all duration-300 ${currentPage === 'HOME' ? 'mobile-nav-active scale-110' : 'text-slate-500 opacity-60'}`}
+        >
+          <div className={`p-2 rounded-xl transition-all ${currentPage === 'HOME' ? 'bg-sky-500/20' : ''}`}>
+            <LayoutDashboard className="w-6 h-6" />
+          </div>
+          <span className="text-[9px] font-black uppercase tracking-widest">Lobby</span>
+        </button>
+        
+        <button 
+          onClick={() => setIsWalletOpen(true)}
+          className="flex flex-col items-center gap-2 text-slate-500 opacity-60 active:opacity-100 transition-all duration-300"
+        >
+          <div className="p-2 rounded-xl bg-slate-800/40">
+            <Wallet className="w-6 h-6" />
+          </div>
+          <span className="text-[9px] font-black uppercase tracking-widest">Vault</span>
+        </button>
+
+        <button 
+          onClick={() => setCurrentPage('PROFILE')}
+          className={`flex flex-col items-center gap-2 transition-all duration-300 ${currentPage === 'PROFILE' ? 'mobile-nav-active scale-110' : 'text-slate-500 opacity-60'}`}
+        >
+          <div className={`p-2 rounded-xl transition-all ${currentPage === 'PROFILE' ? 'bg-sky-500/20' : ''}`}>
+            <User className="w-6 h-6" />
+          </div>
+          <span className="text-[9px] font-black uppercase tracking-widest">Master</span>
+        </button>
+      </nav>
+
       {/* Custom Wallet Modal */}
       {isWalletOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 lg:p-12 animate-in fade-in duration-300">
-          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xl" onClick={() => setIsWalletOpen(false)}></div>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center md:p-6 lg:p-12 animate-in fade-in duration-500">
+          <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-2xl" onClick={() => setIsWalletOpen(false)}></div>
           
-          <div className="relative w-full max-w-2xl bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden">
+          <div className="relative w-full h-full md:h-auto md:max-w-2xl premium-glass rounded-none md:rounded-[3rem] shadow-[0_0_100px_-20px_rgba(56,189,248,0.2)] overflow-y-auto border-none">
             <div className="p-8 lg:p-12 space-y-12">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -967,7 +1239,7 @@ export default function App() {
                     </button>
                   </div>
                   <div className="text-6xl font-black text-white tracking-tighter italic">
-                    {isBalanceVisible ? `${balance.toFixed(2)} USDC` : '•••••• USDC'}
+                    {isBalanceVisible ? `${Number(balance || 0).toFixed(2)} USDC` : '•••••• USDC'}
                   </div>
                 </div>
 
@@ -1018,10 +1290,10 @@ export default function App() {
 
       {/* Deposit Wizard Modal */}
       {isDepositWizardOpen && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center p-6 animate-in fade-in zoom-in duration-300">
-          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-2xl" onClick={() => setIsDepositWizardOpen(false)}></div>
+        <div className="fixed inset-0 z-[250] flex items-center justify-center md:p-6 animate-in fade-in zoom-in duration-500">
+          <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-2xl" onClick={() => setIsDepositWizardOpen(false)}></div>
           
-          <div className="relative w-full max-w-xl bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden">
+          <div className="relative w-full h-full md:h-auto md:max-w-xl premium-glass rounded-none md:rounded-[3rem] shadow-[0_0_100px_-20px_rgba(16,185,129,0.2)] overflow-y-auto border-none">
             <div className="p-8 lg:p-12 space-y-8">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -1150,13 +1422,13 @@ export default function App() {
       {/* Game Over Summary Modal */}
       <AnimatePresence>
         {gameOverResult && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/60 backdrop-blur-sm">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-lg bg-slate-900 rounded-[3rem] shadow-2xl overflow-hidden"
-            >
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center md:p-6 bg-slate-950/60 backdrop-blur-sm">
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="relative w-full h-full md:h-auto md:max-w-lg bg-slate-900 rounded-none md:rounded-[3rem] shadow-2xl overflow-y-auto"
+              >
               {/* Background Accents */}
               <div className="absolute inset-0 bg-gradient-to-b from-red-500/10 to-transparent"></div>
               
@@ -1175,7 +1447,7 @@ export default function App() {
                   </div>
                   <div className="p-6 bg-slate-950/50 rounded-3xl space-y-1">
                     <p className="text-emerald-500/60 font-mono text-[10px] uppercase font-bold tracking-widest">Global Balance</p>
-                    <p className="text-2xl font-black italic">${balance.toFixed(2)}</p>
+                    <p className="text-2xl font-black italic">${Number(balance || 0).toFixed(2)}</p>
                   </div>
                 </div>
 
@@ -1191,7 +1463,7 @@ export default function App() {
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-400">Collected Earnings</span>
-                      <span className="text-emerald-400 font-mono">+${gameOverResult.collected.toFixed(2)}</span>
+                      <span className="text-emerald-400 font-mono">+${Number(gameOverResult.collected || 0).toFixed(2)}</span>
                     </div>
                     <div className="h-px bg-white/5"></div>
                     <div className="flex justify-between text-sm">
@@ -1199,16 +1471,16 @@ export default function App() {
                         <span className="text-red-400">Death Penalty (50%)</span>
                         <span className="text-[10px] text-slate-500 uppercase">Clawback Protocol</span>
                       </div>
-                      <span className="text-red-400 font-mono">-${gameOverResult.penalty.toFixed(2)}</span>
+                      <span className="text-red-400 font-mono">-${Number(gameOverResult.penalty || 0).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-red-400/60">House Rake (5%)</span>
-                      <span className="text-red-400/60 font-mono">-${gameOverResult.rake.toFixed(2)}</span>
+                      <span className="text-red-400/60 font-mono">-${Number(gameOverResult.rake || 0).toFixed(2)}</span>
                     </div>
                     <div className="pt-4 flex justify-between items-baseline">
                       <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Net Session Profit</span>
                       <span className={`text-2xl font-black italic ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.10) >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>
-                        ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.10).toFixed(2)}
+                        ${Number((gameOverResult.collected || 0) - (gameOverResult.penalty || 0) - (gameOverResult.rake || 0) - 0.10).toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -1244,7 +1516,7 @@ export default function App() {
       {/* Global Confirm Modal */}
       <AnimatePresence>
         {confirmModal.show && (
-          <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6">
+          <div className="fixed inset-0 z-[1100] flex items-center justify-center md:p-6">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -1256,7 +1528,7 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-md bg-slate-900 rounded-[2rem] shadow-2xl p-8 space-y-6 overflow-hidden"
+              className="relative w-full h-full md:h-auto md:max-w-md bg-slate-900 rounded-none md:rounded-[2rem] shadow-2xl p-8 space-y-6 overflow-y-auto"
             >
               <div className="w-16 h-16 bg-sky-500/10 rounded-2xl flex items-center justify-center">
                 <Bell className="w-8 h-8 text-sky-400" />

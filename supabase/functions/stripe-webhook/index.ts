@@ -56,4 +56,5 @@ serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ received: true }), { status: 200 })\n})\n
+  return new Response(JSON.stringify({ received: true }), { status: 200 })
+})

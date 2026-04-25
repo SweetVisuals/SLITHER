@@ -13,8 +13,10 @@
   "dependencies": {
     "@ant-design/icons": "^4.8.3",
     "@google/genai": "^1.29.0",
+    "@particle-network/aa": "^2.0.2",
     "@particle-network/auth-core": "^1.5.2",
     "@particle-network/auth-core-modal": "^1.5.2",
+    "@particle-network/chains": "^1.8.3",
     "@particle-network/wallet": "^1.4.6",
     "@supabase/supabase-js": "^2.104.1",
     "@tailwindcss/vite": "^4.1.14",
