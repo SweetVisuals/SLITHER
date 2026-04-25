@@ -101,6 +101,7 @@ export default function App() {
   const [totalSessions, setTotalSessions] = useState(0);
   const [emailInput, setEmailInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [detectedAddresses, setDetectedAddresses] = useState<{addr: string, bal: number, type: string}[]>([]);
   const [isBalanceVisible, setIsBalanceVisible] = useState(true);
   const [isDepositWizardOpen, setIsDepositWizardOpen] = useState(false);
   const [gameOverResult, setGameOverResult] = useState<{ score: number, collected: number, penalty: number, rake: number } | null>(null);
@@ -189,23 +190,19 @@ export default function App() {
             
             biconomyAddress = await initSA('BICONOMY', '2.0.0');
             const biconomyV1Address = await initSA('BICONOMY', '1.0.0');
-            simpleAddress = await initSA('SIMPLE', '2.0.0');
+            simpleAddress = await initSA('SIMPLE', '1.0.0');
+            const simpleV2Address = await initSA('SIMPLE', '2.0.0');
             
-            // If the user provided a manual address, let's include it in diagnostics
-            const manualAddress = '0x3B9fB2041b5CF7CC644836E86601413680Dfacb2';
-            
-            console.log('[Diagnostic] AA Addresses found:', { 
-              biconomyAddress, 
-              biconomyV1Address,
-              simpleAddress,
-              manualAddress
+            // Log for debugging
+            console.log('[Diagnostic] AA Discovery:', { 
+              biconomyV2: biconomyAddress, 
+              biconomyV1: biconomyV1Address,
+              simpleV1: simpleAddress,
+              simpleV2: simpleV2Address
             });
             
-            // If any of these match the manual address, we know which config to use!
-            if (biconomyV1Address) {
-              // Add to scan set in fetchUserData later
-              (userInfo as any).biconomyV1Address = biconomyV1Address;
-            }
+            if (biconomyV1Address) (userInfo as any).biconomyV1Address = biconomyV1Address;
+            if (simpleV2Address) (userInfo as any).simpleV2Address = simpleV2Address;
           } catch (aaInitErr) {
             console.warn('[Diagnostic] AA SDK overall initialization failed:', aaInitErr);
           }
@@ -339,9 +336,7 @@ export default function App() {
       if (aaExtras?.biconomyAddress) scanSet.add(aaExtras.biconomyAddress);
       if (aaExtras?.simpleAddress) scanSet.add(aaExtras.simpleAddress);
       if ((userInfo as any).biconomyV1Address) scanSet.add((userInfo as any).biconomyV1Address);
-      
-      // Manual fallback for the user-provided address
-      scanSet.add('0x3B9fB2041b5CF7CC644836E86601413680Dfacb2');
+      if ((userInfo as any).simpleV2Address) scanSet.add((userInfo as any).simpleV2Address);
       
       if ((userInfo as any).public_address) scanSet.add((userInfo as any).public_address);
       
@@ -379,12 +374,25 @@ export default function App() {
       console.log(`[Diagnostic] Aggregating assets for ${scanSet.size} addresses:`, Array.from(scanSet));
       
       let totalWalletBalance = 0;
+      const newDetected: {addr: string, bal: number, type: string}[] = [];
+      
       for (const addr of scanSet) {
         if (!addr || typeof addr !== 'string' || addr.length < 20 || addr === 'null') continue;
         const bal = await getBalance(addr);
         console.log(`[Diagnostic] Balance for ${addr}: ${bal}`);
         totalWalletBalance += bal;
+        
+        // Determine type for diagnostic display
+        let type = 'EOA/External';
+        if (addr === biconomyAddress) type = 'Biconomy V2';
+        else if (addr === (userInfo as any).biconomyV1Address) type = 'Biconomy V1';
+        else if (addr === simpleAddress) type = 'Simple AA V1';
+        else if (addr === (userInfo as any).simpleV2Address) type = 'Simple AA V2';
+        else if (userInfo.wallets?.some((w: any) => w.public_address === addr)) type = 'Linked Particle';
+        
+        newDetected.push({ addr, bal, type });
       }
+      setDetectedAddresses(newDetected);
 
       console.log(`[Diagnostic] Total Aggregate Wallet Balance: ${totalWalletBalance}`);
       
@@ -799,7 +807,7 @@ export default function App() {
             <h1 className="text-2xl md:text-3xl font-black italic tracking-tighter premium-gradient-text uppercase">Slider</h1>
           </div>
 
-          <nav className="hidden md:flex items-center gap-2">
+          <nav className="hidden lg:flex items-center gap-2">
             <button 
               onClick={() => setCurrentPage('HOME')}
               className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${currentPage === 'HOME' ? 'bg-sky-500/10 text-sky-400' : 'text-slate-500 hover:text-white'}`}
@@ -821,27 +829,43 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
            {userAddress ? (
-             <div className="flex items-center gap-4">
+             <div className="flex items-center gap-2 md:gap-4">
+                {/* Mobile Navigation Icons */}
+                <div className="flex lg:hidden items-center gap-1 bg-slate-900/50 p-1 rounded-2xl">
+                  <button onClick={() => setCurrentPage('HOME')} className={`p-3 rounded-xl transition-all ${currentPage === 'HOME' ? 'bg-sky-500 text-slate-950' : 'text-slate-500'}`}>
+                    <LayoutDashboard className="w-5 h-5" />
+                  </button>
+                  <button onClick={() => setIsWalletOpen(true)} className="p-3 rounded-xl text-slate-500">
+                    <Wallet className="w-5 h-5" />
+                  </button>
+                  <button onClick={() => setCurrentPage('PROFILE')} className={`p-3 rounded-xl transition-all ${currentPage === 'PROFILE' ? 'bg-sky-500 text-slate-950' : 'text-slate-500'}`}>
+                    <User className="w-5 h-5" />
+                  </button>
+                </div>
+
                 <div className="hidden lg:block premium-glass px-4 py-2 rounded-2xl border-none">
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Balance</span>
                     <span className="text-sm font-black text-white italic">${Number(balance || 0).toFixed(2)}</span>
                   </div>
                 </div>
-               <button 
-                 onClick={() => setCurrentPage('PROFILE')}
-                 className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center hover:bg-slate-700 transition-all active:scale-90 border-none shadow-xl"
-               >
-                 <User className="text-sky-400 w-5 h-5" />
-               </button>
+
+                {/* Mobile Quick Logout */}
+                <button 
+                  onClick={handleLogout}
+                  className="w-12 h-12 bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-slate-950 rounded-2xl flex items-center justify-center transition-all active:scale-90 border-none shadow-xl"
+                  title="Terminate Session"
+                >
+                  <X className="w-5 h-5" />
+                </button>
              </div>
            ) : (
              <button 
                onClick={login}
                disabled={isProcessing}
-               className="px-8 py-4 bg-sky-500 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-sky-400 transition-all shadow-lg shadow-sky-500/20 active:scale-95 border-none"
+               className="px-6 md:px-8 py-3 md:py-4 bg-sky-500 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-sky-400 transition-all shadow-lg shadow-sky-500/20 active:scale-95 border-none"
              >
                Authorize Node
              </button>
@@ -903,8 +927,6 @@ export default function App() {
 
             <div className="grid grid-cols-1 gap-8 mb-12">
               {/* Admin Treasury Dashboard - Check email OR specific admin wallet */}
-              {(userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || 
-                userAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') && (
               {/* Admin Treasury Dashboard - Optimized for Mobile */}
               {(userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || 
                 userAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') && (
@@ -1094,7 +1116,8 @@ export default function App() {
                 </div>
               )}
             </div>
-              {currentPage === 'PROFILE' && (
+          )}
+          {currentPage === 'PROFILE' && (
           <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="premium-glass rounded-[3rem] p-10 md:p-16 space-y-12 relative overflow-hidden border-none">
               <div className="absolute top-0 right-0 p-8 opacity-5">
@@ -1117,14 +1140,104 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
-                <div className="p-8 bg-slate-950/40 rounded-[2rem] space-y-4 border-none">
+                <div className="p-8 bg-slate-950/40 rounded-[2rem] border-none space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sky-400 font-mono text-[10px] uppercase font-black tracking-widest">Protocol Stats</h4>
+                    <Activity className="w-4 h-4 text-sky-500/50" />
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-end">
+                      <span className="text-slate-500 text-[10px] uppercase font-black">Total Wagered</span>
+                      <span className="text-xl font-black text-white italic">${Number(totalInjected || 0).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-end">
+                      <span className="text-slate-500 text-[10px] uppercase font-black">Net Yield</span>
+                      <span className={`text-xl font-black italic ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {pnl >= 0 ? '+' : ''}${Number(pnl || 0).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-8 bg-slate-950/40 rounded-[2rem] border-none space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sky-400 font-mono text-[10px] uppercase font-black tracking-widest">Asset Sync</h4>
+                    <RefreshCw className={`w-4 h-4 text-sky-500/50 ${isProcessing ? 'animate-spin' : ''}`} />
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-end">
+                      <span className="text-slate-500 text-[10px] uppercase font-black">Virtual Balance</span>
+                      <span className="text-xl font-black text-white italic">${Number(balance || 0).toFixed(2)}</span>
+                    </div>
+                    <button 
+                      onClick={() => fetchUserData()}
+                      disabled={isProcessing}
+                      className="w-full py-3 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all border-none"
+                    >
+                      {isProcessing ? 'SYNCING ASSETS...' : 'FORCE RE-SCAN WALLETS'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Advanced Diagnostics Section */}
+              <div className="space-y-4 relative z-10">
+                <div className="flex items-center gap-3 px-2">
+                  <ShieldAlert className="w-4 h-4 text-slate-500" />
+                  <h4 className="text-slate-500 font-mono text-[10px] uppercase font-black tracking-widest">Wallet Matrix Diagnostics</h4>
+                </div>
+                <div className="bg-slate-950/20 rounded-[2rem] overflow-x-auto no-scrollbar">
+                  <table className="w-full text-left border-collapse min-w-[500px]">
+                    <thead>
+                      <tr className="bg-slate-950/40">
+                        <th className="p-6 text-[10px] font-black text-slate-500 uppercase tracking-widest">Node Type</th>
+                        <th className="p-6 text-[10px] font-black text-slate-500 uppercase tracking-widest">Field Address</th>
+                        <th className="p-6 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Liquidity</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/30">
+                      {detectedAddresses.length > 0 ? detectedAddresses.map((d, i) => (
+                        <tr key={i} className="hover:bg-sky-500/5 transition-colors">
+                          <td className="p-6">
+                            <span className="px-3 py-1 bg-sky-500/10 text-sky-400 rounded-lg text-[10px] font-black uppercase tracking-tighter">
+                              {d.type}
+                            </span>
+                          </td>
+                          <td className="p-6">
+                            <span className="text-[10px] font-mono text-slate-400 opacity-60">
+                              {d.addr.slice(0, 10)}...{d.addr.slice(-8)}
+                            </span>
+                          </td>
+                          <td className="p-6 text-right">
+                            <span className="text-sm font-black text-white italic">
+                              ${d.bal.toFixed(2)}
+                            </span>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={3} className="p-10 text-center text-slate-600 text-[10px] uppercase font-black tracking-widest italic">
+                            No active nodes detected. Initiating sync required.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="px-6 text-[9px] text-slate-600 italic leading-relaxed">
+                  * System scans for Native USDC and Bridged USDC.e on Arbitrum One. Ensure funds are on the correct network.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
+                <div className="p-8 bg-slate-950/40 rounded-[2rem] border-none space-y-4">
                   <div className="flex items-center gap-3 text-slate-500">
                     <Mail className="w-4 h-4" />
                     <span className="text-[10px] font-black uppercase tracking-widest">Secure Identity</span>
                   </div>
                   <p className="text-white font-bold truncate">{userProfile?.email || 'N/A'}</p>
                 </div>
-                <div className="p-8 bg-slate-950/40 rounded-[2rem] space-y-4 border-none">
+                <div className="p-8 bg-slate-950/40 rounded-[2rem] border-none space-y-4">
                   <div className="flex items-center gap-3 text-slate-500">
                     <Target className="w-4 h-4" />
                     <span className="text-[10px] font-black uppercase tracking-widest">Protocol Address</span>
@@ -1167,40 +1280,6 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* Mobile Bottom Navigation - Enhanced Aesthetics */}
-      <nav className="fixed bottom-0 left-0 right-0 z-[150] premium-glass px-8 py-6 flex items-center justify-between md:hidden shadow-[0_-20px_50px_-20px_rgba(0,0,0,0.8)] rounded-t-[2.5rem] border-none">
-        <button 
-          onClick={() => setCurrentPage('HOME')}
-          className={`flex flex-col items-center gap-2 transition-all duration-300 ${currentPage === 'HOME' ? 'mobile-nav-active scale-110' : 'text-slate-500 opacity-60'}`}
-        >
-          <div className={`p-2 rounded-xl transition-all ${currentPage === 'HOME' ? 'bg-sky-500/20' : ''}`}>
-            <LayoutDashboard className="w-6 h-6" />
-          </div>
-          <span className="text-[9px] font-black uppercase tracking-widest">Lobby</span>
-        </button>
-        
-        <button 
-          onClick={() => setIsWalletOpen(true)}
-          className="flex flex-col items-center gap-2 text-slate-500 opacity-60 active:opacity-100 transition-all duration-300"
-        >
-          <div className="p-2 rounded-xl bg-slate-800/40">
-            <Wallet className="w-6 h-6" />
-          </div>
-          <span className="text-[9px] font-black uppercase tracking-widest">Vault</span>
-        </button>
-
-        <button 
-          onClick={() => setCurrentPage('PROFILE')}
-          className={`flex flex-col items-center gap-2 transition-all duration-300 ${currentPage === 'PROFILE' ? 'mobile-nav-active scale-110' : 'text-slate-500 opacity-60'}`}
-        >
-          <div className={`p-2 rounded-xl transition-all ${currentPage === 'PROFILE' ? 'bg-sky-500/20' : ''}`}>
-            <User className="w-6 h-6" />
-          </div>
-          <span className="text-[9px] font-black uppercase tracking-widest">Master</span>
-        </button>
-      </nav>
-
       {/* Custom Wallet Modal */}
       {isWalletOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center md:p-6 lg:p-12 animate-in fade-in duration-500">
