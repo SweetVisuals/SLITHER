@@ -142,11 +142,10 @@ export default function App() {
     }, 5000);
   };
 
-  const handleTopUp = async () => {
-    // Get target from global window (set by the button click)
-    const targetAddr = (window as any)._targetDepositAddr;
-    const targetType = (window as any)._targetDepositType;
-    const amount = Number(topUpAmount);
+  const handleTopUp = async (explicitAmount?: number, explicitType?: string, explicitAddr?: string) => {
+    const targetAddr = explicitAddr || (window as any)._targetDepositAddr;
+    const targetType = explicitType || (window as any)._targetDepositType;
+    const amount = explicitAmount !== undefined ? explicitAmount : Number(topUpAmount);
 
     if (!userInfo?.uuid || !amount || amount <= 0 || !targetAddr) return;
     
