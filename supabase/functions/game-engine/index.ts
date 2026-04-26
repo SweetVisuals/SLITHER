@@ -142,6 +142,79 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === 'WITHDRAW') {
+      const { amount } = payload;
+      if (!amount || amount <= 0) throw new Error('Invalid withdrawal amount');
+
+      const { data: profile, error: profileError } = await supabaseClient
+        .from('profiles')
+        .select('balance, wallet_address')
+        .eq('id', userId)
+        .single();
+        
+      if (profileError || !profile) throw new Error('Profile not found');
+      if (profile.balance < amount) throw new Error('Insufficient credits for withdrawal');
+
+      // Attempt Payout
+      let txHash = null;
+      if (profile.wallet_address) {
+        try {
+          const { ethers } = await import("https://esm.sh/ethers@6.10.0");
+          const relayerKey = Deno.env.get('RELAYER_PRIVATE_KEY');
+          const projectId = Deno.env.get('PARTICLE_PROJECT_ID');
+          const clientKey = Deno.env.get('PARTICLE_CLIENT_KEY');
+          
+          if (relayerKey && projectId && clientKey) {
+            const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+            const amountHex = "0x" + Math.floor(amount * 10**6).toString(16);
+            const data = "0xa9059cbb" + 
+                         profile.wallet_address.replace("0x", "").padStart(64, "0") + 
+                         amountHex.replace("0x", "").padStart(64, "0");
+
+            const response = await fetch(`https://api.particle.network/server/rpc?chainId=42161&projectUuid=${projectId}&projectKey=${clientKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "particle_aa_sendUserOperation",
+                params: [{
+                  name: "BICONOMY",
+                  version: "2.0.0",
+                  owner: new ethers.Wallet(relayerKey).address
+                }, {
+                  tx: { to: usdcAddress, value: "0x0", data: data },
+                  feeQuote: "native"
+                }]
+              })
+            });
+
+            const res = await response.json();
+            if (res.result && res.result.userOpHash) {
+               txHash = res.result.userOpHash;
+            } else {
+               console.error('Particle AA Error during Withdraw:', res.error);
+            }
+          }
+        } catch (err) {
+          console.error('Withdrawal payout logic error:', err);
+        }
+      }
+
+      // If payout initiated, deduct from balance. If not, it remains in virtual credits.
+      if (txHash) {
+        const { error: updateError } = await supabaseClient
+          .from('profiles')
+          .update({ balance: profile.balance - amount })
+          .eq('id', userId);
+        if (updateError) throw updateError;
+      }
+
+      return new Response(JSON.stringify({ payoutSent: !!txHash, txHash, newBalance: txHash ? profile.balance - amount : profile.balance }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     if (action === 'DIE') {
       const { x, y, sessionEarnings } = payload;
       
@@ -159,14 +232,15 @@ Deno.serve(async (req) => {
       const penalty = earnings * 0.5;
       const playerPayout = earnings - penalty;
       
-      // We always subtract the penalty from the DB balance.
-      let newBalance = Math.max(0, (Number(profile.balance) || 0) - penalty);
+      // Subtract penalty from current virtual balance
+      let currentBalance = (Number(profile.balance) || 0);
+      let newBalance = Math.max(0, currentBalance - penalty);
       
-      const entryFeeDrop = 0.50; // Updated to 0.50 as per user request
+      const entryFeeDrop = 0.50; 
       const houseRake = (penalty + entryFeeDrop) * 0.05;
       const totalToDrop = Math.max(0, (penalty + entryFeeDrop) - houseRake);
 
-      // 4. THE MAGIC: Automatic Smart Account Payout (Gasless/USDC-Gas)
+      // Attempt Automatic Payout
       let txHash = null;
       if (playerPayout > 0 && profile.wallet_address) {
         try {
@@ -178,13 +252,10 @@ Deno.serve(async (req) => {
           if (relayerKey && projectId && clientKey) {
             const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
             const amountHex = "0x" + Math.floor(playerPayout * 10**6).toString(16);
-            
-            // Minimal ERC20 Transfer Data: 0xa9059cbb + address(32) + amount(32)
             const data = "0xa9059cbb" + 
                          profile.wallet_address.replace("0x", "").padStart(64, "0") + 
                          amountHex.replace("0x", "").padStart(64, "0");
 
-            // Call Particle's Smart Account API to execute gasless
             const response = await fetch(`https://api.particle.network/server/rpc?chainId=42161&projectUuid=${projectId}&projectKey=${clientKey}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -195,14 +266,10 @@ Deno.serve(async (req) => {
                 params: [{
                   name: "BICONOMY",
                   version: "2.0.0",
-                  owner: new ethers.Wallet(relayerKey).address // This identifies the EOA owner
+                  owner: new ethers.Wallet(relayerKey).address
                 }, {
-                  tx: {
-                    to: usdcAddress,
-                    value: "0x0",
-                    data: data
-                  },
-                  feeQuote: "native" // The Paymaster will handle the conversion or sponsorship
+                  tx: { to: usdcAddress, value: "0x0", data: data },
+                  feeQuote: "native"
                 }]
               })
             });
@@ -210,22 +277,16 @@ Deno.serve(async (req) => {
             const res = await response.json();
             if (res.result && res.result.userOpHash) {
                txHash = res.result.userOpHash;
-               console.log(`Smart Payout initiated: ${txHash}`);
-               // If payout succeeded, subtract the payout amount from DB balance 
-               // to move it from 'Virtual' to 'Real'. The sync will add it back later.
+               // Success: Subtract payout from virtual balance since it moved to real wallet
                newBalance = Math.max(0, newBalance - playerPayout);
-            } else {
-               console.error('Particle AA Error:', res.error);
             }
-          } else {
-            console.warn('Relayer not configured. Payout remains in virtual balance.');
           }
-        } catch ( payoutErr ) {
-          console.error('Relayer Payout Failed:', payoutErr);
+        } catch (err) {
+          console.error('Auto-payout error:', err);
         }
       }
 
-      // 2. Update DB balance and close session
+      // Final DB Update
       await supabaseClient
         .from('profiles')
         .update({ balance: newBalance })
@@ -241,7 +302,7 @@ Deno.serve(async (req) => {
         .eq('user_id', userId)
         .eq('status', 'active');
 
-      // 3. Create persistent drops for redistribution
+      // Create drops
       if (totalToDrop > 0) {
         const drops = [];
         const dropCount = Math.min(10, Math.max(1, Math.floor(totalToDrop / 0.05))); 

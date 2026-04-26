@@ -177,9 +177,27 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
     const handleMouseDown = () => { isDashing = true; };
     const handleMouseUp = () => { isDashing = false; };
     
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches[0]) {
+        mouseX = e.touches[0].clientX;
+        mouseY = e.touches[0].clientY;
+      }
+    };
+    const handleTouchStart = (e: TouchEvent) => {
+      isDashing = true;
+      if (e.touches[0]) {
+        mouseX = e.touches[0].clientX;
+        mouseY = e.touches[0].clientY;
+      }
+    };
+    const handleTouchEnd = () => { isDashing = false; };
+
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchstart', handleTouchStart, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
 
     // Multiplayer Sync Init
     const channel = supabase.channel('arena', {
@@ -468,10 +486,11 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
           const dy = sHead.y - food.y;
           if (dx * dx + dy * dy < (sRadius + FOOD_RADIUS) * (sRadius + FOOD_RADIUS)) {
             player.score += food.value;
-            player.collectedMoney += food.moneyValue || 0;
+            const moneyVal = food.moneyValue || 0;
+            player.collectedMoney += moneyVal;
             foods.splice(f, 1);
             scoreUpdateRef.current(player.score);
-            if (food.moneyValue > 0) moneyCollectRef.current(food.moneyValue);
+            if (moneyVal > 0) moneyCollectRef.current(moneyVal);
           }
         }
 
@@ -482,9 +501,11 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
           const dy = sHead.y - drop.y;
           if (dx * dx + dy * dy < (sRadius + FOOD_RADIUS * 2) * (sRadius + FOOD_RADIUS * 2)) {
             const claimedDrop = dropsRef.current.splice(f, 1)[0];
-            moneyCollectRef.current(claimedDrop.moneyValue, claimedDrop.id);
+            const dropMoney = claimedDrop.moneyValue || 0;
+            player.collectedMoney += dropMoney;
             player.score += 5; // Extra score for gold drops
             scoreUpdateRef.current(player.score);
+            moneyCollectRef.current(dropMoney, claimedDrop.id);
           }
         }
       }
@@ -546,9 +567,17 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
         }
       }
 
+      const isMobileDevice = width < 768;
+      const isSmallMobile = width < 480;
+      const zoom = isSmallMobile ? 0.5 : (isMobileDevice ? 0.7 : 1.0);
+      
       const pCameraHead = cameraHead || { x: WORLD_SIZE/2, y: WORLD_SIZE/2 };
       ctx.save();
-      ctx.translate(width / 2 - pCameraHead.x, height / 2 - pCameraHead.y);
+      ctx.scale(zoom, zoom);
+      ctx.translate(width / (2 * zoom) - pCameraHead.x, height / (2 * zoom) - pCameraHead.y);
+
+      const viewportW = width / zoom;
+      const viewportH = height / zoom;
 
       // Map Boundary Border
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)'; // Sky-400
@@ -567,8 +596,8 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       }
       // Food & Drops
       [...foods, ...dropsRef.current].forEach(f => {
-        if (f.x > pCameraHead.x - width/2 - 100 && f.x < pCameraHead.x + width/2 + 100 &&
-            f.y > pCameraHead.y - height/2 - 100 && f.y < pCameraHead.y + height/2 + 100) {
+        if (f.x > pCameraHead.x - viewportW/2 - 100 && f.x < pCameraHead.x + viewportW/2 + 100 &&
+            f.y > pCameraHead.y - viewportH/2 - 100 && f.y < pCameraHead.y + viewportH/2 + 100) {
           
           if (f.isDrop) {
             // Money Drops now look like vibrant rainbow food but slightly larger/pulsing
@@ -602,8 +631,8 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       snakesToDraw.forEach(s => {
         for (let i = s.segments.length - 1; i >= 0; i--) {
           const seg = s.segments[i];
-          if (seg.x < pCameraHead.x - width/2 - 100 || seg.x > pCameraHead.x + width/2 + 100 ||
-              seg.y < pCameraHead.y - height/2 - 100 || seg.y > pCameraHead.y + height/2 + 100) continue;
+          if (seg.x < pCameraHead.x - viewportW/2 - 100 || seg.x > pCameraHead.x + viewportW/2 + 100 ||
+              seg.y < pCameraHead.y - viewportH/2 - 100 || seg.y > pCameraHead.y + viewportH/2 + 100) continue;
 
           ctx.beginPath();
           const baseRadius = getSnakeRadius(s.score);
@@ -732,6 +761,9 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
       channel.unsubscribe();
       dropsSubscription.unsubscribe();
     };

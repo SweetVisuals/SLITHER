@@ -899,46 +899,47 @@ export default function App() {
           <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             {/* Profile & Identity Section */}
             {/* Profile & Identity Section - Optimized for Mobile */}
-            <div className="relative group premium-glass rounded-[2rem] md:rounded-[3rem] overflow-hidden">
+            <div className="relative group premium-glass rounded-[2rem] md:rounded-[3rem] overflow-hidden border-none shadow-2xl">
                <div className="absolute inset-0 bg-gradient-to-br from-sky-500/10 via-transparent to-transparent"></div>
-               <div className="relative flex flex-col md:flex-row items-center justify-between gap-6 p-6 md:p-10">
-                  <div className="flex items-center gap-5 md:gap-8">
-                     <div className="relative">
-                        <div className="w-16 h-16 md:w-24 md:h-24 bg-sky-500 rounded-[1.5rem] md:rounded-[2rem] flex items-center justify-center shadow-2xl shadow-sky-500/30">
-                           <User className="w-8 h-8 md:w-12 md:h-12 text-slate-950" />
+               <div className="relative flex flex-col md:flex-row items-center md:items-center justify-between gap-8 p-6 md:p-10">
+                  {/* Identity Block */}
+                  <div className="flex items-center gap-4 md:gap-8 w-full md:w-auto">
+                     <div className="relative flex-shrink-0">
+                        <div className="w-14 h-14 md:w-24 md:h-24 bg-sky-500 rounded-2xl md:rounded-[2rem] flex items-center justify-center shadow-2xl shadow-sky-500/30">
+                           <User className="w-7 h-7 md:w-12 md:h-12 text-slate-950" />
                         </div>
-                        <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-emerald-500 rounded-full border-[3px] border-slate-900 animate-pulse"></div>
+                        <div className="absolute -bottom-1 -right-1 w-5 h-5 md:w-6 md:h-6 bg-emerald-500 rounded-full border-[3px] border-slate-950 animate-pulse"></div>
                      </div>
-                     <div className="space-y-1">
-                        <h3 className="text-xl md:text-3xl font-black text-white uppercase italic tracking-tighter premium-gradient-text">
+                     <div className="space-y-1 min-w-0">
+                        <h3 className="text-lg md:text-3xl font-black text-white uppercase italic tracking-tighter premium-gradient-text truncate">
                            {userProfile?.name || userInfo?.name || (userInfo?.email ? userInfo.email.split('@')[0] : 'Anonymous Operator')}
                         </h3>
-                        <p className="text-sky-400/80 font-mono text-[10px] md:text-sm uppercase tracking-widest font-black">
+                        <p className="text-sky-400/80 font-mono text-[9px] md:text-sm uppercase tracking-widest font-black truncate opacity-80">
                            {userProfile?.email || userInfo?.email || (userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'unlinked@system.node')}
                         </p>
                      </div>
                   </div>
                   
-                  <div className="flex w-full md:w-auto items-center gap-3 md:gap-4 overflow-x-auto no-scrollbar pb-2 md:pb-0">
-                     <button onClick={fetchUserData} className="flex-1 md:flex-none flex items-center justify-center gap-3 px-6 py-4 bg-slate-800/60 hover:bg-slate-700 text-sky-400 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl border-none">
-                        <RefreshCw className={`w-4 h-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                  {/* Action Grid - Contained and non-scrollable on mobile */}
+                  <div className="grid grid-cols-2 md:flex w-full md:w-auto gap-3 md:gap-4">
+                     <button onClick={fetchUserData} className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-slate-800/60 hover:bg-slate-700 text-sky-400 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl border-none">
+                        <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin' : ''}`} />
                         <span>SYNC</span>
                      </button>
                      <button 
                         disabled={isProcessing}
                         onClick={() => setIsDepositWizardOpen(true)}
-                        className="flex-1 md:flex-none flex items-center justify-center gap-3 px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-emerald-500/20 disabled:opacity-50 border-none"
+                        className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-emerald-500/20 disabled:opacity-50 border-none"
                      >
-                        <PlusCircle className="w-4 h-4" />
+                        <PlusCircle className="w-3.5 h-3.5" />
                         <span>TOPUP</span>
                      </button>
-                     <button onClick={() => setIsWalletOpen(true)} className="flex-1 md:flex-none flex items-center justify-center gap-3 px-6 py-4 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-sky-500/20 border-none">
-                        <Wallet className="w-4 h-4" />
+                     <button onClick={() => setIsWalletOpen(true)} className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-sky-500/20 border-none">
+                        <Wallet className="w-3.5 h-3.5" />
                         <span>WALLET</span>
                      </button>
-                     {/* Mobile Quick Logout */}
-                     <button onClick={handleLogout} className="md:hidden flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 border-none">
-                        <X className="w-4 h-4" />
+                     <button onClick={handleLogout} className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 border-none">
+                        <LogOut className="w-3.5 h-3.5" />
                         <span>EXIT</span>
                      </button>
                   </div>
@@ -1301,7 +1302,7 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-6 bg-slate-800/30 rounded-2xl space-y-3">
+                  <div className="p-6 bg-slate-800/30 rounded-2xl space-y-3 border-none">
                     <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest">Operator Address</p>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-bold text-white font-mono truncate max-w-[120px]">
@@ -1320,14 +1321,37 @@ export default function App() {
                   </div>
 
                   <button 
-                    onClick={() => window.open('https://wallet.particle.network', '_blank')}
-                    className="p-6 bg-slate-800/30 hover:bg-slate-800/50 rounded-2xl flex items-center justify-between group transition-all"
+                    disabled={isProcessing || balance <= 0}
+                    onClick={async () => {
+                      if (!userInfo?.uuid) return;
+                      setIsProcessing(true);
+                      try {
+                        const { data: { session: authSession } } = await supabase.auth.getSession();
+                        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                          },
+                          body: JSON.stringify({ action: 'WITHDRAW', payload: { userId: userInfo.uuid, amount: balance } })
+                        });
+                        const result = await res.json();
+                        if (result.error) throw new Error(result.error);
+                        notify(result.payoutSent ? 'Withdrawal initiated successfully!' : 'Withdrawal processed to virtual credits.', 'success');
+                        fetchUserData();
+                      } catch (err: any) {
+                        notify(err.message || 'Withdrawal failed', 'error');
+                      } finally {
+                        setIsProcessing(false);
+                      }
+                    }}
+                    className="p-6 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-2xl flex items-center justify-between group transition-all border-none disabled:opacity-50"
                   >
                     <div className="text-left">
-                      <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest">Advanced Config</p>
-                      <p className="text-white font-bold">External Node</p>
+                      <p className="text-emerald-500/60 font-mono text-[10px] uppercase tracking-widest">Payout Execution</p>
+                      <p className="text-white font-bold">Withdraw to Wallet</p>
                     </div>
-                    <ExternalLink className="w-5 h-5 text-sky-500 group-hover:scale-110 transition-transform" />
+                    <ExternalLink className="w-5 h-5 text-emerald-500 group-hover:scale-110 transition-transform" />
                   </button>
                 </div>
               </div>
@@ -1530,14 +1554,10 @@ export default function App() {
                       </div>
                       <span className="text-red-400 font-mono">-${Number(gameOverResult.penalty || 0).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-red-400/60">House Rake (5%)</span>
-                      <span className="text-red-400/60 font-mono">-${Number(gameOverResult.rake || 0).toFixed(2)}</span>
-                    </div>
                     <div className="pt-4 flex justify-between items-baseline">
                       <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Net Session Profit</span>
-                      <span className={`text-2xl font-black italic ${(gameOverResult.collected - gameOverResult.penalty - gameOverResult.rake - 0.10) >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>
-                        ${Number((gameOverResult.collected || 0) - (gameOverResult.penalty || 0) - (gameOverResult.rake || 0) - 0.10).toFixed(2)}
+                      <span className={`text-2xl font-black italic ${(gameOverResult.collected - gameOverResult.penalty - 0.10) >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>
+                        ${Number((gameOverResult.collected || 0) - (gameOverResult.penalty || 0) - 0.10).toFixed(2)}
                       </span>
                     </div>
                   </div>
