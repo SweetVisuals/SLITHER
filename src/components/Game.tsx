@@ -101,8 +101,56 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
     // Clear any stale remote players on mount
     remotePlayersRef.current.clear();
     
+    console.log('Initializing Game component...', { isTestMode, userProfileId: userProfile?.id });
     const localPlayerId = userProfile?.id || 'player-' + Math.random().toString(36).slice(2, 7);
     
+    // 1. Initialize Player first to avoid any reference errors
+    const pStartPos = { x: Math.random() * WORLD_SIZE, y: Math.random() * WORLD_SIZE };
+    const playerSegments: Point[] = [];
+    for (let i = 0; i < INITIAL_LENGTH; i++) {
+        playerSegments.push({ x: pStartPos.x, y: pStartPos.y + i * SEGMENT_GAP });
+    }
+
+    let player: Snake = {
+      id: localPlayerId,
+      isPlayer: true,
+      name: userProfile?.name || 'You',
+      segments: playerSegments,
+      color: '#38BDF8',
+      angle: -Math.PI / 2,
+      targetAngle: -Math.PI / 2,
+      score: INITIAL_LENGTH,
+      collectedMoney: 0,
+      dead: false
+    };
+
+    // 2. Setup safe getSafeSpawnPoint
+    const getSafeSpawnPoint = (excludePlayer = false) => {
+      let maxAttempts = 15;
+      const allActive = (excludePlayer || !player ? bots : [player, ...bots]).filter(b => b && !b.dead);
+      let spawnX = Math.random() * WORLD_SIZE;
+      let spawnY = Math.random() * WORLD_SIZE;
+
+      while (maxAttempts > 0) {
+        let isSafe = true;
+        for (const s of allActive) {
+          const head = s.segments?.[0];
+          if (!head) continue;
+          const dx = head.x - spawnX;
+          const dy = head.y - spawnY;
+          if (dx * dx + dy * dy < 800 * 800) {
+            isSafe = false;
+            break;
+          }
+        }
+        if (isSafe) break;
+        spawnX = Math.random() * WORLD_SIZE;
+        spawnY = Math.random() * WORLD_SIZE;
+        maxAttempts--;
+      }
+      return { x: spawnX, y: spawnY };
+    }
+
     let width = window.innerWidth;
     let height = window.innerHeight;
     canvas.width = width;
@@ -135,53 +183,40 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
 
     // Multiplayer Sync Init
     const channel = supabase.channel('arena', {
-      config: {
-        broadcast: { self: false },
-      }
+      config: { broadcast: { self: false } }
     });
 
-    channel
-      .on('broadcast', { event: 'pos' }, ({ payload }) => {
-        const { id, name, segments, angle, score, color } = payload;
-        if (id === localPlayerId) return; // Skip self to prevent ghost duplicate
-        
-        remotePlayersRef.current.set(id, {
-          id,
-          name,
-          segments,
-          angle,
-          score,
-          color,
-          isPlayer: false,
-          dead: false,
-          targetAngle: angle,
-          collectedMoney: 0,
-          lastUpdate: Date.now()
-        });
-      })
-      .on('broadcast', { event: 'death' }, ({ payload }) => {
-        const { id } = payload;
-        const victim = remotePlayersRef.current.get(id);
-        if (victim) victim.dead = true;
-      })
-      .subscribe();
+    try {
+      channel
+        .on('broadcast', { event: 'pos' }, ({ payload }) => {
+          const { id, name, segments, angle, score, color } = payload;
+          if (id === localPlayerId) return;
+          remotePlayersRef.current.set(id, {
+            id, name, segments, angle, score, color,
+            isPlayer: false, dead: false, targetAngle: angle,
+            collectedMoney: 0, lastUpdate: Date.now()
+          });
+        })
+        .on('broadcast', { event: 'death' }, ({ payload }) => {
+          const { id } = payload;
+          const victim = remotePlayersRef.current.get(id);
+          if (victim) victim.dead = true;
+        })
+        .subscribe();
+    } catch (e) {
+      console.error('Multiplayer channel error:', e);
+    }
 
     channelRef.current = channel;
 
-    // Listen for database drops with a unique channel name to prevent re-subscription errors
     const dropsChannelId = `drops-db-${Math.random().toString(36).slice(2, 7)}`;
     const dropsSubscription = supabase
       .channel(dropsChannelId)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'drops' }, payload => {
         const drop = payload.new;
         dropsRef.current.push({
-          id: drop.id,
-          x: drop.x,
-          y: drop.y,
-          color: '#34D399', // Using a bright rainbow-compatible green for persistent drops
-          value: 5,
-          moneyValue: Number(drop.money_value),
-          isDrop: true
+          id: drop.id, x: drop.x, y: drop.y, color: '#34D399', value: 5,
+          moneyValue: Number(drop.money_value), isDrop: true
         });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'drops' }, payload => {
@@ -191,17 +226,11 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       })
       .subscribe();
 
-    // Fetch initial drops
     supabase.from('drops').select('*').is('claimed_by', null).then(({ data }) => {
       if (data) {
         dropsRef.current = data.map(d => ({
-          id: d.id,
-          x: d.x,
-          y: d.y,
-          color: '#34D399',
-          value: 5,
-          moneyValue: Number(d.money_value),
-          isDrop: true
+          id: d.id, x: d.x, y: d.y, color: '#34D399', value: 5,
+          moneyValue: Number(d.money_value), isDrop: true
         }));
       }
     });
@@ -210,65 +239,19 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
     let bots: Snake[] = [];
     const effectiveBotCount = isTestMode ? BOT_COUNT : 0;
     const BOT_NAMES = ['destroyer', 'slyther', 'venom', 'snek', 'noodle', 'danger_noodle', 'worm', 'alpha', 'beta', 'chomper', 'glizzy', 'slithers', 'voldemort', 'python', 'anaconda', 'boa', 'cobra', 'mamba', 'viper', 'rattler', 'basilisk', 'serpent', 'slimy', 'scaly', 'fang', 'hiss'];
-    
-    const getSafeSpawnPoint = (excludePlayer = false) => {
-      let maxAttempts = 15;
-      const allActive = (excludePlayer || !player ? bots : [player, ...bots]).filter(b => b && !b.dead);
-      let spawnX = Math.random() * WORLD_SIZE;
-      let spawnY = Math.random() * WORLD_SIZE;
-
-      while (maxAttempts > 0) {
-        let isSafe = true;
-        for (const s of allActive) {
-          const head = s.segments[0];
-          if (!head) continue;
-          const dx = head.x - spawnX;
-          const dy = head.y - spawnY;
-          if (dx * dx + dy * dy < 800 * 800) {
-            isSafe = false;
-            break;
-          }
-        }
-        if (isSafe) break;
-        spawnX = Math.random() * WORLD_SIZE;
-        spawnY = Math.random() * WORLD_SIZE;
-        maxAttempts--;
-      }
-      return { x: spawnX, y: spawnY };
-    }
 
     const spawnFood = (x?: number, y?: number, val?: number, moneyVal?: number, customColor?: string) => {
         const colors = ['#38BDF8', '#818CF8', '#C084FC', '#F472B6', '#FB7185', '#FBBF24', '#34D399'];
         const food = {
             id: Math.random().toString(36),
-            // Ensure food spawns inside the arena with a small margin
             x: Math.max(20, Math.min(WORLD_SIZE - 20, x ?? Math.random() * WORLD_SIZE)),
             y: Math.max(20, Math.min(WORLD_SIZE - 20, y ?? Math.random() * WORLD_SIZE)),
             color: customColor ?? colors[Math.floor(Math.random() * colors.length)],
             value: val ?? 1,
             moneyValue: moneyVal ?? 0.01,
-            isDrop: moneyVal && moneyVal > 0.01 ? true : false // Flag as premium drop if value > basic food
+            isDrop: moneyVal && moneyVal > 0.01 ? true : false
         };
         foods.push(food);
-    };
-
-    const pStartPos = getSafeSpawnPoint(true);
-    const playerSegments: Point[] = [];
-    for (let i = 0; i < INITIAL_LENGTH; i++) {
-        playerSegments.push({ x: pStartPos.x, y: pStartPos.y + i * SEGMENT_GAP });
-    }
-
-    let player: Snake = {
-      id: localPlayerId,
-      isPlayer: true,
-      name: userProfile?.name || 'You',
-      segments: playerSegments,
-      color: '#38BDF8',
-      angle: -Math.PI / 2,
-      targetAngle: -Math.PI / 2,
-      score: INITIAL_LENGTH,
-      collectedMoney: 0,
-      dead: false
     };
 
     const spawnBot = () => {
@@ -360,6 +343,12 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       if (!isRunning) return;
       const dt = time - lastTime;
       lastTime = time;
+
+      if (!player || !player.segments || player.segments.length === 0) {
+        console.warn('Player not initialized in loop');
+        if (isRunning) animationId = requestAnimationFrame(loop);
+        return;
+      }
 
       const head = player.segments[0];
       if (!player.dead && head) {
@@ -523,6 +512,11 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       ctx.fillStyle = '#0F172A';
       ctx.fillRect(0, 0, width, height);
 
+      if (!player || !player.segments || player.segments.length === 0) {
+         if (isRunning) animationId = requestAnimationFrame(loop);
+         return;
+      }
+
       let cameraHead = player.segments[0];
       const isSpectating = player.dead && spectateTargetId && deathTime && (Date.now() - deathTime > 3000);
 
@@ -638,7 +632,11 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       // Map Background
       ctx.fillStyle = 'rgba(15,23,42,0.4)';
       ctx.beginPath();
-      ctx.roundRect(0, 0, mapSize, mapSize, 12);
+      if (ctx.roundRect) {
+        ctx.roundRect(0, 0, mapSize, mapSize, 12);
+      } else {
+        ctx.rect(0, 0, mapSize, mapSize);
+      }
       ctx.fill();
       
 
@@ -715,7 +713,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       channel.unsubscribe();
       dropsSubscription.unsubscribe();
     };
-  }, [userProfile, isTestMode]);
+  }, [userProfile?.id, isTestMode]);
 
   return <canvas ref={canvasRef} className="block w-full h-full cursor-crosshair touch-none" />;
 }

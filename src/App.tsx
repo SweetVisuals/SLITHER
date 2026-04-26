@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Play, 
   Activity, 
@@ -37,6 +37,7 @@ import { ArbitrumOne } from '@particle-network/chains';
 import { QRCodeCanvas } from 'qrcode.react';
 import { supabase } from './lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
+import Game from './components/Game';
 import './premium.css';
 
 type Page = 'HOME' | 'PLAYING' | 'PROFILE';
@@ -241,12 +242,55 @@ export default function App() {
       }
     };
     getAddress();
-  }, [connectionStatus, connectUserInfo, authUserInfo, provider]);
+  }, [fetchUserData, userInfo?.uuid]);
+
+  // Handle address discovery separately to keep dependencies clean
+  useEffect(() => {
+    if (connectionStatus !== 'connected' || !userInfo?.uuid) return;
+    
+    const discoverAddresses = async () => {
+      let biconomyAddress = '';
+      let simpleAddress = '';
+      
+      if (provider) {
+        try {
+          const initSA = async (type: string, version: string = '2.0.0') => {
+            const sa = new SmartAccount(provider, {
+              projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
+              clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
+              appId: import.meta.env.VITE_PARTICLE_APP_ID,
+              aaOptions: {
+                accountContracts: {
+                  [type]: [{ version, chainIds: [ArbitrumOne.id] }]
+                }
+              }
+            });
+            return await sa.getAddress();
+          };
+          
+          biconomyAddress = await initSA('BICONOMY', '2.0.0');
+          simpleAddress = await initSA('SIMPLE', '1.0.0');
+        } catch (e) {
+          console.warn('Address discovery error:', e);
+        }
+      }
+
+      const address = biconomyAddress || simpleAddress || ethAddress || userInfo.wallets?.[0]?.public_address;
+      if (address && address !== userAddress) {
+        setUserAddress(address);
+        fetchUserData(address, 0, { biconomyAddress, simpleAddress });
+      } else if (!userProfile && userInfo?.uuid) {
+        fetchUserData();
+      }
+    };
+
+    discoverAddresses();
+  }, [connectionStatus, userInfo?.uuid, provider, ethAddress]);
 
   // Add state for treasury balance
   const [treasuryBalance, setTreasuryBalance] = useState<number>(0);
 
-  const fetchUserData = async (forcedAddressInput?: string | any, retryCount = 0, aaExtras?: { biconomyAddress?: string, simpleAddress?: string }) => {
+  const fetchUserData = useCallback(async (forcedAddressInput?: string | any, retryCount = 0, aaExtras?: { biconomyAddress?: string, simpleAddress?: string }) => {
     if (!userInfo?.uuid) return;
     
     // Ensure forcedAddress is a string (prevents event objects from leaking in)
@@ -1148,6 +1192,18 @@ export default function App() {
               </div>
 
             </div>
+          </div>
+        )}
+
+        {currentPage === 'PLAYING' && (
+          <div className="fixed inset-0 z-[50] bg-slate-950">
+            <Game 
+              onGameOver={handleGameOver}
+              onScoreUpdate={setScore}
+              onMoneyCollect={handleMoneyCollect}
+              userProfile={userProfile}
+              isTestMode={isTestMode}
+            />
           </div>
         )}
       </main>
