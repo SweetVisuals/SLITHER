@@ -9,6 +9,9 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
+const PRIMARY_WALLET = "0xf7dAd3bB9E89502d2e2ea478659875063b4f3F7A";
+const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -48,6 +51,55 @@ Deno.serve(async (req) => {
         status: 401, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
+    }
+
+    // --- ADMIN SYSTEM RESET ---
+    if (action === 'SYSTEM_RESET') {
+      const targetUserId = payload?.targetUserId;
+      const forcedBal = payload?.forceMatchBalance;
+
+      let query = supabaseClient.from('profiles').select('id, wallet_address, balance');
+      if (targetUserId) query = query.eq('id', targetUserId);
+
+      const { data: profiles, error: pErr } = await query;
+      if (pErr) throw pErr;
+
+      const results = [];
+      for (const profile of profiles) {
+        try {
+          // Use forced balance if provided for a specific user, otherwise fetch on-chain
+          const onChainBal = (targetUserId === profile.id && forcedBal !== undefined) 
+            ? forcedBal 
+            : await getUSDCBalance(profile.wallet_address);
+          
+          if (onChainBal !== null) {
+            // Ensure the house wallet doesn't inflate a player profile
+            const isHouseWallet = profile.wallet_address?.toLowerCase() === PRIMARY_WALLET.toLowerCase();
+            const finalBal = isHouseWallet ? 0 : onChainBal;
+
+            const { error: uErr } = await supabaseClient
+              .from('profiles')
+              .update({
+                balance: finalBal,
+                last_wallet_balance: finalBal,
+                total_sessions: 0,
+                total_earnings: 0,
+                total_injected: finalBal 
+              })
+              .eq('id', profile.id);
+            
+            if (!uErr) results.push({ id: profile.id, success: true });
+          }
+        } catch (e) {
+          results.push({ id: profile.id, success: false, error: e.message });
+        }
+      }
+
+      return new Response(JSON.stringify({ 
+        message: 'System reset complete', 
+        processed: results.length,
+        details: results 
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     if (action === 'START_SESSION') {
@@ -173,53 +225,41 @@ Deno.serve(async (req) => {
       const finalWithdrawAmount = Math.min(amount, currentBalance);
       console.log(`[GameEngine] Processing withdrawal of ${finalWithdrawAmount} for ${userId}`);
 
-      let txHash = null;
-      if (profile.wallet_address) {
+      // Payout Helper (EOA Transfer)
+      const sendPayout = async (to: string, amount: number) => {
         try {
           const relayerKey = Deno.env.get('RELAYER_PRIVATE_KEY');
-          const projectId = Deno.env.get('PARTICLE_PROJECT_ID');
-          const clientKey = Deno.env.get('PARTICLE_CLIENT_KEY');
-          
-          if (relayerKey && projectId && clientKey) {
-            const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-            const amountHex = "0x" + Math.floor(finalWithdrawAmount * 10**6).toString(16);
-            const data = "0xa9059cbb" + 
-                         profile.wallet_address.replace("0x", "").padStart(64, "0") + 
-                         amountHex.replace("0x", "").padStart(64, "0");
-
-            const response = await fetch(`https://api.particle.network/server/rpc?chainId=42161&projectUuid=${projectId}&projectKey=${clientKey}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: "2.0",
-                id: 1,
-                method: "particle_aa_sendUserOperation",
-                params: [{
-                  name: "BICONOMY",
-                  version: "2.0.0",
-                  owner: new ethers.Wallet(relayerKey).address
-                }, {
-                  tx: { to: usdcAddress, value: "0x0", data: data },
-                  feeQuote: "native"
-                }]
-              })
-            });
-
-            const res = await response.json();
-            if (res.result && res.result.userOpHash) {
-               txHash = res.result.userOpHash;
-               console.log(`[GameEngine] Withdrawal success, tx: ${txHash}`);
-            } else {
-               console.error('[GameEngine] Particle AA Error:', JSON.stringify(res.error));
-            }
-          } else {
-            console.warn('[GameEngine] Missing environment variables for payout');
+          if (!relayerKey) {
+            console.warn('[GameEngine] No RELAYER_PRIVATE_KEY found');
+            return null;
           }
+
+          const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
+          const wallet = new ethers.Wallet(relayerKey, provider);
+          
+          const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+          const usdcAbi = ["function transfer(address to, uint256 amount) returns (bool)"];
+          const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, wallet);
+
+          const amountUnits = ethers.parseUnits(amount.toFixed(6), 6);
+          console.log(`[GameEngine] EOA Payout: ${amount} USDC from ${wallet.address} to ${to}`);
+          
+          const tx = await usdcContract.transfer(to, amountUnits);
+          console.log(`[GameEngine] TX Sent: ${tx.hash}`);
+          return tx.hash;
         } catch (err) {
-          console.error('[GameEngine] Payout logic crash:', err.message);
+          console.error('[GameEngine] EOA Payout failed:', err.message);
+          return null;
         }
+      };
+
+      let txHash = null;
+      const destinationAddress = payload?.targetAddress || profile.wallet_address;
+      
+      if (destinationAddress) {
+        txHash = await sendPayout(destinationAddress, finalWithdrawAmount);
       } else {
-        console.warn('[GameEngine] No wallet address found for user profile');
+        console.warn('[GameEngine] No destination wallet address found');
       }
 
       if (txHash) {
@@ -242,6 +282,57 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === 'DEPOSIT') {
+      const { txHash } = payload;
+      if (!txHash) throw new Error('No transaction hash provided');
+
+      console.log(`[GameEngine] Verifying deposit: ${txHash}`);
+      const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
+      
+      // Wait for transaction to be confirmed
+      const tx = await provider.getTransaction(txHash);
+      if (!tx) throw new Error('Transaction not found');
+      
+      const receipt = await tx.wait();
+      if (receipt.status !== 1) throw new Error('Transaction failed');
+
+      // Verify destination and token
+      const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+      // Basic check: transfer(address,uint256) is 0xa9059cbb...
+      // We should ideally parse logs for a more robust check
+      const logs = receipt.logs.filter(l => l.address.toLowerCase() === usdcAddress.toLowerCase());
+      if (logs.length === 0) throw new Error('No USDC transfer found in transaction');
+
+      // For this implementation, we'll parse the transfer log to get the amount
+      const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
+      let totalDeposited = 0;
+      
+      for (const log of logs) {
+        try {
+          const parsed = iface.parseLog(log);
+          if (parsed.name === 'Transfer' && parsed.args.to.toLowerCase() === PRIMARY_WALLET.toLowerCase()) {
+            totalDeposited += Number(parsed.args.value) / 1e6;
+          }
+        } catch (e) {}
+      }
+
+      if (totalDeposited <= 0) throw new Error('No transfer to Treasury found');
+
+      // Award credits
+      const { data: profile } = await supabaseClient.from('profiles').select('balance, total_injected').eq('id', userId).single();
+      const newBal = (Number(profile?.balance) || 0) + totalDeposited;
+      const newInjected = (Number(profile?.total_injected) || 0) + totalDeposited;
+      
+      await supabaseClient.from('profiles').update({ 
+        balance: newBal, 
+        total_injected: newInjected 
+      }).eq('id', userId);
+
+      return new Response(JSON.stringify({ success: true, added: totalDeposited, newBalance: newBal }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     if (action === 'DIE') {
       const { x, y, sessionEarnings } = payload;
       
@@ -254,58 +345,44 @@ Deno.serve(async (req) => {
       if (profileError) throw profileError;
 
       const earnings = Number(sessionEarnings) || 0;
-      const penalty = earnings * 0.5;
+      const buyIn = 0.10;
+      const netPnl = Math.max(0, earnings - buyIn);
+      
+      // Redistribution Math
+      const penalty = netPnl * 0.50;
+      const totalToDrop = netPnl * 0.40;
+      const houseRake = netPnl * 0.05;
+      const foodPool = netPnl * 0.05;
+
       const playerPayout = earnings - penalty;
       
       let currentBalance = Number(profile.balance) || 0;
       let newBalance = Math.max(0, currentBalance - penalty);
       let newLastWalletBalance = Number(profile.last_wallet_balance) || 0;
       
-      const entryFeeDrop = 0.50; 
-      const houseRake = (penalty + entryFeeDrop) * 0.05;
-      const totalToDrop = Math.max(0, (penalty + entryFeeDrop) - houseRake);
-
       let txHash = null;
       if (playerPayout > 0 && profile.wallet_address) {
-        try {
-          const relayerKey = Deno.env.get('RELAYER_PRIVATE_KEY');
-          const projectId = Deno.env.get('PARTICLE_PROJECT_ID');
-          const clientKey = Deno.env.get('PARTICLE_CLIENT_KEY');
-          
-          if (relayerKey && projectId && clientKey) {
+        // Payout Helper (Re-used for EOA)
+        const sendPayout = async (to: string, amount: number) => {
+          try {
+            const relayerKey = Deno.env.get('RELAYER_PRIVATE_KEY');
+            if (!relayerKey) return null;
+            const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
+            const wallet = new ethers.Wallet(relayerKey, provider);
             const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-            const amountHex = "0x" + Math.floor(playerPayout * 10**6).toString(16);
-            const data = "0xa9059cbb" + 
-                         profile.wallet_address.replace("0x", "").padStart(64, "0") + 
-                         amountHex.replace("0x", "").padStart(64, "0");
-
-            const response = await fetch(`https://api.particle.network/server/rpc?chainId=42161&projectUuid=${projectId}&projectKey=${clientKey}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: "2.0",
-                id: 1,
-                method: "particle_aa_sendUserOperation",
-                params: [{
-                  name: "BICONOMY",
-                  version: "2.0.0",
-                  owner: new ethers.Wallet(relayerKey).address
-                }, {
-                  tx: { to: usdcAddress, value: "0x0", data: data },
-                  feeQuote: "native"
-                }]
-              })
-            });
-
-            const res = await response.json();
-            if (res.result && res.result.userOpHash) {
-               txHash = res.result.userOpHash;
-               newBalance = Math.max(0, newBalance - playerPayout);
-               newLastWalletBalance += playerPayout;
-            }
+            const usdcContract = new ethers.Contract(usdcAddress, ["function transfer(address to, uint256 amount) returns (bool)"], wallet);
+            const tx = await usdcContract.transfer(to, ethers.parseUnits(amount.toFixed(6), 6));
+            return tx.hash;
+          } catch (err) {
+            console.error('[GameEngine] DIE Payout failed:', err.message);
+            return null;
           }
-        } catch (err) {
-          console.error('[GameEngine] Auto-payout error:', err.message);
+        };
+        
+        txHash = await sendPayout(profile.wallet_address, playerPayout);
+        if (txHash) {
+          newBalance = Math.max(0, newBalance - playerPayout);
+          newLastWalletBalance += playerPayout;
         }
       }
 
@@ -329,12 +406,12 @@ Deno.serve(async (req) => {
 
       if (totalToDrop > 0) {
         const drops = [];
-        const dropCount = Math.min(10, Math.max(1, Math.floor(totalToDrop / 0.05))); 
+        const dropCount = Math.min(15, Math.max(1, Math.floor(totalToDrop / 0.02))); 
         const valuePerDrop = totalToDrop / dropCount;
 
         for (let i = 0; i < dropCount; i++) {
-          const offsetX = (Math.random() - 0.5) * 150;
-          const offsetY = (Math.random() - 0.5) * 150;
+          const offsetX = (Math.random() - 0.5) * 200;
+          const offsetY = (Math.random() - 0.5) * 200;
           drops.push({
             money_value: valuePerDrop,
             x: x + offsetX,

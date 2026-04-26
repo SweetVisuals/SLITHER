@@ -37,13 +37,16 @@ createRoot(document.getElementById('root')!).render(
           name: 'Arbitrum',
           id: 42161,
         },
+        // Enable external wallet support (MetaMask, Rainbow, etc.)
         wallet: {
           visible: false,
           themeType: 'dark',
           customStyle: {
             primaryColor: '#0ea5e9',
           }
-        }
+        },
+        // Allow these social and external methods
+        authTypes: ['google', 'email', 'apple', 'twitter', 'github'],
       }}
     >
       <App />

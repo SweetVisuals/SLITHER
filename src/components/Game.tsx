@@ -7,6 +7,7 @@ interface GameProps {
   onMoneyCollect: (amount: number, dropId?: string) => void;
   userProfile?: any;
   isTestMode: boolean;
+  wager: number;
 }
 
 const WORLD_SIZE = 4000;
@@ -47,7 +48,9 @@ interface Snake {
   targetAngle: number;
   score: number;
   collectedMoney: number;
+  worth: number;
   dead: boolean;
+  isBoosting: boolean;
   lastUpdate?: number;
 }
 
@@ -72,7 +75,7 @@ function lerpAngle(a: number, b: number, t: number) {
   return a + delta * t;
 }
 
-export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userProfile, isTestMode }: GameProps) {
+export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userProfile, isTestMode, wager }: GameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameOverRef = useRef(onGameOver);
   const scoreUpdateRef = useRef(onScoreUpdate);
@@ -121,7 +124,9 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       targetAngle: -Math.PI / 2,
       score: INITIAL_LENGTH,
       collectedMoney: 0,
-      dead: false
+      worth: wager,
+      dead: false,
+      isBoosting: false
     };
 
     // 2. Setup safe getSafeSpawnPoint
@@ -207,12 +212,14 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
     try {
       channel
         .on('broadcast', { event: 'pos' }, ({ payload }) => {
-          const { id, name, segments, angle, score, color } = payload;
+          const { id, name, segments, angle, score, color, worth, isBoosting } = payload;
           if (id === localPlayerId) return;
           remotePlayersRef.current.set(id, {
             id, name, segments, angle, score, color,
             isPlayer: false, dead: false, targetAngle: angle,
-            collectedMoney: 0, lastUpdate: Date.now()
+            collectedMoney: 0, worth: worth || 0, 
+            isBoosting: isBoosting || false,
+            lastUpdate: Date.now()
           });
         })
         .on('broadcast', { event: 'death' }, ({ payload }) => {
@@ -297,7 +304,9 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
         targetAngle: Math.random() * Math.PI * 2,
         score: length,
         collectedMoney: 0,
-        dead: false
+        worth: 0.10 + (Math.random() * 0.4), // Bots have random worth starting around $0.10
+        dead: false,
+        isBoosting: false
       });
     };
 
@@ -389,6 +398,9 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
           const screenDy = mouseY - height / 2;
           player.targetAngle = Math.atan2(screenDy, screenDx);
           
+          // Update player worth
+          player.worth = wager + player.collectedMoney;
+
           // Sync position periodically
           syncTimer += dt;
           if (syncTimer > 50) { // 20fps sync
@@ -401,7 +413,9 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
                 segments: player.segments.slice(0, 30), // Only sync first 30 for perf
                 angle: player.angle,
                 score: player.score,
-                color: player.color
+                color: player.color,
+                worth: player.worth,
+                isBoosting: player.isBoosting
               }
             });
             syncTimer = 0;
@@ -431,6 +445,8 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
         } else {
            isSnakeDashing = isDashing && snake.score > INITIAL_LENGTH;
         }
+
+        snake.isBoosting = isSnakeDashing;
 
         snake.angle = lerpAngle(snake.angle, snake.targetAngle, Math.min(1, TURN_SPEED * (isSnakeDashing ? 0.6 : 1)));
         const baseSpeed = snake.isPlayer ? SNAKE_SPEED : BOT_SPEED;
@@ -629,19 +645,26 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       if (!player.dead) snakesToDraw.push(player);
 
       snakesToDraw.forEach(s => {
+        const baseRadius = getSnakeRadius(s.score);
         for (let i = s.segments.length - 1; i >= 0; i--) {
           const seg = s.segments[i];
           if (seg.x < pCameraHead.x - viewportW/2 - 100 || seg.x > pCameraHead.x + viewportW/2 + 100 ||
               seg.y < pCameraHead.y - viewportH/2 - 100 || seg.y > pCameraHead.y + viewportH/2 + 100) continue;
 
           ctx.beginPath();
-          const baseRadius = getSnakeRadius(s.score);
           const radius = Math.max(3, baseRadius * (1 - i / (s.segments.length * 1.5)));
           ctx.arc(seg.x, seg.y, radius, 0, Math.PI * 2);
           ctx.fillStyle = s.isPlayer ? (i%2===0 ? '#38BDF8' : '#0EA5E9') : s.color;
+          
+          if (s.isBoosting) {
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = s.isPlayer ? '#38BDF8' : s.color;
+          }
+
           if (!s.isPlayer) ctx.globalAlpha = i%2===0 ? 1 : 0.8;
           ctx.fill();
           ctx.globalAlpha = 1;
+          ctx.shadowBlur = 0;
           
           if (i === 0) {
              ctx.fillStyle = 'white';
@@ -654,12 +677,66 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
              }
           }
         }
+        
+        // Premium Badge Rendering
         const head = s.segments[0];
         if (head) {
-           ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-           ctx.font = "bold 12px Inter, sans-serif";
+           const badgeY = head.y - baseRadius - 25;
+           const nameText = s.name.toUpperCase();
+           const worthText = `$${Number(s.worth || 0).toFixed(2)}`;
+           const combinedText = `${nameText} • ${worthText}`;
+           
+           ctx.font = "bold 11px font-mono, Inter, sans-serif";
+           const textWidth = ctx.measureText(combinedText).width;
+           const paddingX = 12;
+           const paddingY = 6;
+           const badgeW = textWidth + paddingX * 2;
+           const badgeH = 22;
+           const badgeX = head.x - badgeW / 2;
+
+           // Glassmorphism Badge Background
+           ctx.shadowBlur = 15;
+           ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+           ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'; // Slate-900
+           
+           // Draw rounded capsule
+           ctx.beginPath();
+           const r = badgeH / 2;
+           ctx.moveTo(badgeX + r, badgeY);
+           ctx.lineTo(badgeX + badgeW - r, badgeY);
+           ctx.quadraticCurveTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + r);
+           ctx.quadraticCurveTo(badgeX + badgeW, badgeY + badgeH, badgeX + badgeW - r, badgeY + badgeH);
+           ctx.lineTo(badgeX + r, badgeY + badgeH);
+           ctx.quadraticCurveTo(badgeX, badgeY + badgeH, badgeX, badgeY + r);
+           ctx.quadraticCurveTo(badgeX, badgeY, badgeX + r, badgeY);
+           ctx.closePath();
+           ctx.fill();
+           
+           // Subtle border for premium feel
+           ctx.shadowBlur = 0;
+           ctx.strokeStyle = s.isPlayer ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255, 255, 255, 0.1)';
+           ctx.lineWidth = 1;
+           ctx.stroke();
+
+           // Render Text
            ctx.textAlign = "center";
-           ctx.fillText(s.name, head.x, head.y - getSnakeRadius(s.score) - 10);
+           ctx.textBaseline = "middle";
+           
+           // Split text color for name and worth
+           const dotIndex = combinedText.indexOf('•');
+           const namePart = combinedText.substring(0, dotIndex);
+           const worthPart = combinedText.substring(dotIndex);
+           
+           ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+           ctx.fillText(combinedText, head.x, badgeY + badgeH / 2);
+           
+           // Highlight worth with emerald if local player or sky if remote
+           ctx.fillStyle = s.isPlayer ? '#38BDF8' : '#34D399';
+           const worthOnly = worthText;
+           const worthWidth = ctx.measureText(worthOnly).width;
+           const fullWidth = ctx.measureText(combinedText).width;
+           ctx.textAlign = "left";
+           ctx.fillText(worthOnly, head.x + (fullWidth/2) - worthWidth, badgeY + badgeH / 2);
         }
       });
 
@@ -767,7 +844,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       channel.unsubscribe();
       dropsSubscription.unsubscribe();
     };
-  }, [userProfile?.id, isTestMode]);
+  }, [userProfile?.id, isTestMode, wager]);
 
   return <canvas ref={canvasRef} className="block w-full h-full cursor-crosshair touch-none" />;
 }

@@ -29,8 +29,10 @@ import {
   Bell,
   Info,
   Crown,
-  LogOut
+  LogOut,
+  ArrowUpCircle
 } from 'lucide-react';
+import { ethers } from 'ethers';
 import { useConnect, useAuthCore, useEthereum } from '@particle-network/auth-core-modal';
 import { SmartAccount } from '@particle-network/aa';
 import { ArbitrumOne } from '@particle-network/chains';
@@ -41,6 +43,9 @@ import Game from './components/Game';
 import './premium.css';
 
 type Page = 'HOME' | 'PLAYING' | 'PROFILE';
+
+// Global singleton flag - prevents WASM double-init crash
+let aaInitializing = false;
 
 export default function App() {
   const { connect, disconnect, connectionStatus, userInfo: connectUserInfo } = useConnect();
@@ -80,7 +85,39 @@ export default function App() {
   const [gameOverResult, setGameOverResult] = useState<{ score: number, collected: number, penalty: number, rake: number } | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [currentSessionLoot, setCurrentSessionLoot] = useState(0);
+  const [topUpAmount, setTopUpAmount] = useState('');
+  const [totalWalletBalance, setTotalWalletBalance] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const smartAccountRef = useRef<SmartAccount | null>(null);
+
+  // Initialize SmartAccount once to avoid WASM re-init crashes
+  useEffect(() => {
+    if (!provider || smartAccountRef.current || aaInitializing) return;
+    
+    const initAA = async () => {
+      aaInitializing = true;
+      try {
+        const smartAccount = new SmartAccount(provider, {
+          projectId: '3a913b51-6884-4638-bd23-fa0d728c7975',
+          clientKey: 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
+          appId: '8c38a8da-9800-4764-9007-76d512c5163e',
+          aaOptions: {
+            accountContracts: {
+              BICONOMY: [{ version: '2.0.0', chainIds: [42161] }]
+            }
+          }
+        });
+        smartAccountRef.current = smartAccount;
+        console.log('[AA] Smart Account initialized successfully');
+      } catch (err) {
+        console.error('[AA] Initialization error:', err);
+        aaInitializing = false; // Allow retry on error
+      }
+    };
+    
+    initAA();
+  }, [provider]);
+
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     title: string;
@@ -89,11 +126,12 @@ export default function App() {
   }>({ show: false, title: '', message: '', onConfirm: () => {} });
 
   // CONFIGURATION
-  const PRIMARY_WALLET = '0x157A8176A02d30e12343f8d9c622e6260D350A69'; 
+  const PRIMARY_WALLET = '0xf7dAd3bB9E89502d2e2ea478659875063b4b3F7A'; 
   const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Native USDC on Arbitrum
   const USDC_E_ADDRESS = '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8'; // Bridged USDC.e on Arbitrum
   const USDC_DECIMALS = 6; 
   const USDC_E_DECIMALS = 6;
+  const ENTRY_FEE = 0.10;
 
   const notify = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -103,7 +141,178 @@ export default function App() {
     }, 5000);
   };
 
-  const isAdmin = userInfo?.email === 'ptnmgmt@gmail.com';
+  const handleTopUp = async () => {
+    // Get target from global window (set by the button click)
+    const targetAddr = (window as any)._targetDepositAddr;
+    const targetType = (window as any)._targetDepositType;
+    const amount = Number(topUpAmount);
+
+    if (!userInfo?.uuid || !amount || amount <= 0 || !targetAddr) return;
+    
+    setIsProcessing(true);
+    try {
+      notify(`Initiating deposit of ${amount} USDC from ${targetType}...`, 'info');
+
+      if (!provider) throw new Error('No wallet provider found');
+
+      // Find the balance of the specific target address
+      const targetNode = detectedAddresses.find(d => d.addr.toLowerCase() === targetAddr.toLowerCase());
+      const availableBal = targetNode ? targetNode.bal : 0;
+      
+      // Cap the amount to the available balance in that specific wallet
+      let finalAmount = amount;
+      if (finalAmount > availableBal) {
+        console.warn(`[TopUp] Requested ${finalAmount} but only ${availableBal} available in target node. Capping.`);
+        finalAmount = availableBal;
+      }
+
+      if (finalAmount <= 0) throw new Error('Target wallet has no USDC balance');
+
+      // Force correct Biconomy version before proceeding
+      if (targetType && targetType.includes('biconomy')) {
+        const targetVersion = targetType.includes('v1') ? '1.0.0' : '2.0.0';
+        const currentOptions = (smartAccountRef.current as any)?.options;
+        const currentVersion = currentOptions?.aaOptions?.accountContracts?.BICONOMY?.[0]?.version;
+        
+        if (currentVersion !== targetVersion) {
+           console.log(`[TopUp] Switching Biconomy from ${currentVersion} to ${targetVersion}`);
+           smartAccountRef.current = new (smartAccountRef.current as any).constructor(particle.ethProvider, {
+             projectId: "9c3c588e-4a6c-48c9-8d76-5835698b58a1",
+             clientKey: "cl6mD9IOfn6H9v3p2SgRCH9oF86tQn6kLg9rL5qN",
+             appId: "c29e2f42-7a0e-473d-9d10-3375868a984a",
+             aaOptions: {
+               accountContracts: {
+                 BICONOMY: [{ version: targetVersion, chainIds: [42161] }]
+               }
+             }
+           });
+        }
+      }
+
+      const activeAddress = await smartAccountRef.current?.getAddress();
+      const isSmartAccount = 
+        targetType?.toLowerCase().includes('biconomy') || 
+        targetType?.toLowerCase().includes('simple') ||
+        (activeAddress && targetAddr?.toLowerCase() === activeAddress.toLowerCase());
+
+      let txHash = '';
+      if (isSmartAccount) {
+        // --- SMART ACCOUNT DEPOSIT ---
+        if (!smartAccountRef.current) throw new Error('Smart Account not ready. Please refresh.');
+        
+        notify(`Preparing Smart Account transfer of ${finalAmount.toFixed(6)} USDC...`, 'info');
+        const usdcInterface = new ethers.Interface(["function transfer(address to, uint256 amount) returns (bool)"]);
+        const callData = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
+
+        // Some SDK versions prefer an array of transactions
+        const tx = { to: USDC_ADDRESS, data: callData, value: '0x0' };
+
+        // Get fee quotes to find a paymaster (Smart Account has no ETH for gas)
+        console.log('[AA] Estimating gas for:', tx);
+        const feeQuotes = await smartAccountRef.current.getFeeQuotes(tx);
+        console.log('[AA] Fee quotes received:', JSON.stringify(feeQuotes, null, 2));
+
+        if (feeQuotes.verifyingPaymasterGasless) {
+          console.log('[AA] Using gasless paymaster');
+          notify('Sponsoring gas fees...', 'info');
+          txHash = await smartAccountRef.current.sendTransaction({
+            tx,
+            feeQuote: feeQuotes.verifyingPaymasterGasless.feeQuote,
+          } as any);
+        } else if (feeQuotes.tokenPaymaster?.feeQuotes?.length) {
+          const usdcFee = feeQuotes.tokenPaymaster.feeQuotes.find(
+            (q: any) => q.tokenInfo.address.toLowerCase() === USDC_ADDRESS.toLowerCase()
+          ) || feeQuotes.tokenPaymaster.feeQuotes[0];
+          
+          console.log('[AA] Using token paymaster, fee:', usdcFee);
+          
+          // DEDUCT FEE: Check if we have enough total balance for amount + fee
+          const feeAmount = Number(usdcFee.fee) / 10 ** usdcFee.tokenInfo.decimals;
+          if (finalAmount + feeAmount > availableBal) {
+            // Deduct fee plus a 5% buffer for slippage/price changes
+            const buffer = feeAmount * 0.05;
+            const adjustedAmount = Math.max(0, finalAmount - feeAmount - buffer);
+            console.log(`[TopUp] Adjusting for fees: ${finalAmount} -> ${adjustedAmount}`);
+            
+            if (adjustedAmount <= 0) throw new Error(`Insufficient USDC for fees ($${feeAmount.toFixed(4)})`);
+            
+            // Update the transaction data with the adjusted amount
+            const newCallData = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(adjustedAmount.toFixed(6), 6)]);
+            tx.data = newCallData;
+            notify(`Adjusting to $${adjustedAmount.toFixed(3)} to cover gas fees...`, 'info');
+          }
+
+          notify(`Paying gas with ${usdcFee.tokenInfo.symbol}...`, 'info');
+          txHash = await smartAccountRef.current.sendTransaction({
+            tx,
+            feeQuote: usdcFee,
+            tokenPaymasterAddress: feeQuotes.tokenPaymaster.tokenPaymasterAddress,
+          } as any);
+        } else {
+          console.log('[AA] No paymaster available, attempting native gas');
+          notify('Signing transaction...', 'info');
+          txHash = await smartAccountRef.current.sendTransaction({ tx } as any);
+        }
+        
+        console.log('[TopUp] TX Hash:', txHash);
+        notify('Transaction broadcasted! Syncing credits...', 'info');
+      } else {
+        // --- STANDARD EOA DEPOSIT ---
+        const browserProvider = new ethers.BrowserProvider(provider as any);
+        const signer = await browserProvider.getSigner();
+        const usdcContract = new ethers.Contract(USDC_ADDRESS, ["function transfer(address to, uint256 amount) returns (bool)"], signer);
+        
+        notify(`Requesting signature for ${finalAmount.toFixed(6)} USDC...`, 'info');
+        const tx = await usdcContract.transfer(PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6));
+        notify('Transaction sent! Confirming on-chain...', 'info');
+        const receipt = await tx.wait();
+        if (!receipt || receipt.status !== 1) throw new Error('Transaction failed on-chain');
+        txHash = tx.hash;
+      }
+
+      // Call backend to verify and add credits
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash: txHash } })
+      });
+
+      const result = await res.json();
+      if (result.success) {
+        notify(`Successfully added ${result.added} credits!`, 'success');
+        // Update local profile state immediately for real-time dashboard feedback
+        if (userProfile) {
+          setUserProfile({
+            ...userProfile,
+            balance: result.newBalance
+          });
+          setBalance(result.newBalance);
+        }
+        await fetchUserData();
+      } else {
+        throw new Error(result.error || 'Failed to award credits');
+      }
+    } catch (err: any) {
+      console.error('[TopUp] Error:', err);
+      notify(err.reason || err.message || 'Top-up failed', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const isAdmin = useMemo(() => {
+    const eoaWallet = userInfo?.wallets?.find((w: any) => w.type?.toLowerCase() === 'eoa')?.public_address;
+    return (
+      userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || 
+      userAddress?.toLowerCase() === PRIMARY_WALLET.toLowerCase() ||
+      eoaWallet?.toLowerCase() === PRIMARY_WALLET.toLowerCase() ||
+      (userInfo as any)?.public_address?.toLowerCase() === PRIMARY_WALLET.toLowerCase()
+    );
+  }, [userInfo, userAddress, PRIMARY_WALLET]);
   
   const handleLogout = async () => {
     try {
@@ -133,6 +342,7 @@ export default function App() {
   };
 
   const [treasuryBalance, setTreasuryBalance] = useState<number>(0);
+  const [treasuryEthBalance, setTreasuryEthBalance] = useState<number>(0);
 
   const updateUserData = async (updates: any) => {
     if (!userInfo?.uuid) return;
@@ -232,148 +442,138 @@ export default function App() {
       };
 
       const scanSet = new Set<string>();
-      if (forcedAddress) scanSet.add(forcedAddress);
-      if (userAddress) scanSet.add(userAddress);
-      if (ethAddress) scanSet.add(ethAddress);
+      const addAddr = (a: any) => {
+        if (a && typeof a === 'string' && a.length > 20 && a !== 'null' && a !== 'undefined') {
+          scanSet.add(a.toLowerCase());
+        }
+      };
+
+      if (PRIMARY_WALLET) addAddr(PRIMARY_WALLET);
+      if (forcedAddress) addAddr(forcedAddress);
+      if (userAddress) addAddr(userAddress);
+      if (ethAddress) addAddr(ethAddress);
       
-      // Add all discovered AA addresses
-      if (aaExtras?.biconomyAddress) scanSet.add(aaExtras.biconomyAddress);
-      if (aaExtras?.simpleAddress) scanSet.add(aaExtras.simpleAddress);
-      if ((userInfo as any).biconomyV1Address) scanSet.add((userInfo as any).biconomyV1Address);
-      if ((userInfo as any).simpleV2Address) scanSet.add((userInfo as any).simpleV2Address);
-      if ((userInfo as any).biconomyV2Address) scanSet.add((userInfo as any).biconomyV2Address);
-      if ((userInfo as any).simpleV1Address) scanSet.add((userInfo as any).simpleV1Address);
+      if (aaExtras?.biconomyAddress) addAddr(aaExtras.biconomyAddress);
+      if (aaExtras?.simpleAddress) addAddr(aaExtras.simpleAddress);
+      if ((userInfo as any).biconomyV1Address) addAddr((userInfo as any).biconomyV1Address);
+      if ((userInfo as any).simpleV2Address) addAddr((userInfo as any).simpleV2Address);
 
       // Add all wallets from Particle
       const pWallets = userInfo.wallets || [];
-      pWallets.forEach((w: any) => {
-        if (w.public_address && w.public_address !== 'null') scanSet.add(w.public_address);
-      });
+      pWallets.forEach((w: any) => addAddr(w.public_address));
 
-      // Check provider accounts directly as a fallback
+      // Check provider accounts
       if (provider) {
         try {
           const pAccounts = await (provider as any).request({ method: 'eth_accounts' });
-          if (pAccounts && Array.isArray(pAccounts)) {
-            pAccounts.forEach((a: string) => {
-              if (a && typeof a === 'string' && a !== 'null') scanSet.add(a);
-            });
-          }
+          if (Array.isArray(pAccounts)) pAccounts.forEach(addAddr);
           
-          // Try to specifically request the smart account via Particle-specific RPC
           try {
             const aaAccount = await (provider as any).request({ method: 'particle_aa_getSmartAccount' });
-            if (aaAccount && typeof aaAccount === 'string') scanSet.add(aaAccount);
-            if (Array.isArray(aaAccount)) aaAccount.forEach((a: any) => {
-              if (a?.smartAccountAddress) scanSet.add(a.smartAccountAddress);
-            });
-          } catch (aaErr) {
-            // This might fail if the method isn't supported, which is fine
-          }
-        } catch (e) {
-          console.warn('[Diagnostic] Failed to fetch provider accounts:', e);
-        }
+            if (Array.isArray(aaAccount)) {
+              aaAccount.forEach((a: any) => addAddr(a?.smartAccountAddress));
+            } else if (typeof aaAccount === 'string') {
+              addAddr(aaAccount);
+            }
+          } catch (aaErr) {}
+        } catch (e) {}
       }
 
-      console.log(`[Diagnostic] Aggregating assets for ${scanSet.size} addresses:`, Array.from(scanSet));
+      console.log(`[Diagnostic] Scanning ${scanSet.size} unique addresses:`, Array.from(scanSet));
       
       let totalWalletBalance = 0;
       let hasError = false;
       const newDetected: {addr: string, bal: number, type: string}[] = [];
+      const processedAddrs = new Set<string>();
       
       for (const addr of scanSet) {
-        if (!addr || typeof addr !== 'string' || addr.length < 20 || addr === 'null') continue;
+        if (processedAddrs.has(addr)) continue;
+        processedAddrs.add(addr);
+
         const bal = await getBalance(addr);
         if (bal === null) {
           hasError = true;
           continue;
         }
-        console.log(`[Diagnostic] Balance for ${addr}: ${bal}`);
-        totalWalletBalance += bal;
         
-        // Determine type for diagnostic display
         let type = 'EOA/External';
-        if (aaExtras?.biconomyAddress && addr === aaExtras.biconomyAddress) type = 'Biconomy V2';
-        else if (addr === (userInfo as any).biconomyV1Address) type = 'Biconomy V1';
-        else if (aaExtras?.simpleAddress && addr === aaExtras.simpleAddress) type = 'Simple AA V1';
-        else if (addr === (userInfo as any).simpleV2Address) type = 'Simple AA V2';
-        else if (userInfo.wallets?.some((w: any) => w.public_address === addr)) type = 'Linked Particle';
+        const isTreasury = addr.toLowerCase() === PRIMARY_WALLET.toLowerCase();
+
+        if (isTreasury) {
+          type = 'House Treasury';
+          setTreasuryBalance(bal);
+        }
+        else if (aaExtras?.biconomyAddress?.toLowerCase() === addr) type = 'Biconomy V2';
+        else if ((userInfo as any).biconomyV1Address?.toLowerCase() === addr) type = 'Biconomy V1';
+        else if (aaExtras?.simpleAddress?.toLowerCase() === addr) type = 'Simple AA V1';
+        else if ((userInfo as any).simpleV2Address?.toLowerCase() === addr) type = 'Simple AA V2';
+        else if (userInfo.wallets?.some((w: any) => w.public_address?.toLowerCase() === addr)) type = 'Linked Particle';
+        
+        if (!isTreasury && bal > 0) {
+          console.log(`[Diagnostic] Adding ${bal} from ${type} (${addr.slice(0,6)}) to credits`);
+          totalWalletBalance += bal;
+        }
         
         newDetected.push({ addr, bal, type });
       }
       setDetectedAddresses(newDetected);
 
       console.log(`[Diagnostic] Total Aggregate Wallet Balance: ${totalWalletBalance}`);
+      setTotalWalletBalance(totalWalletBalance);
       
-      // Update local address if not set
+      // --- LIVE SYNC ARCHITECTURE ---
+      const { data: profiles, error: pError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userInfo.uuid);
+
+      if (pError) throw pError;
+      const data = profiles?.[0];
+      
+      // --- CREDIT-ONLY ARCHITECTURE ---
+      // The database balance is now the absolute source of truth for "In-Game Credits".
+      // We no longer auto-merge wallet funds. Users must explicitly "Top Up".
+      let finalBalance = data?.balance || 0;
+      let finalInjected = data?.total_injected || 0;
+
+      // Handle new users: start at 0 credits
+      if (!data) {
+        finalBalance = 0;
+        finalInjected = 0;
+      }
+
       const primaryAddr = forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
       if (primaryAddr && !userAddress) setUserAddress(primaryAddr);
 
-      // Fetch treasury balance if admin (check email OR wallet)
-      const currentAddress = primaryAddr;
-      if (userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || currentAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') {
-        const tBal = await getBalance(PRIMARY_WALLET);
-        if (tBal !== null) setTreasuryBalance(tBal);
-      }
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userInfo.uuid)
-        .single();
-
       if (data) {
-        let activeBalance = Number(data.balance) || 0;
-        const lastWalletBalance = Number(data.last_wallet_balance) || 0;
-        
-        // ADDITIVE SYNC LOGIC:
-        // Instead of overwriting, we calculate the delta of the wallet since last check.
-        // This preserves in-game virtual credits (collections/buy-ins) while picking up
-        // external deposits or withdrawals.
-        if (!hasError && (totalWalletBalance - lastWalletBalance) > 0.0001) {
-          const delta = totalWalletBalance - lastWalletBalance;
-          console.log(`[Sync] Wallet shifted by +${delta.toFixed(4)}. Updating DB balance...`);
-          activeBalance += delta;
-          updateUserData({ balance: activeBalance, last_wallet_balance: totalWalletBalance });
-        } else if (!hasError && Math.abs(totalWalletBalance - lastWalletBalance) > 0.0001) {
-          console.log(`[Sync] Wallet shifted by ${ (totalWalletBalance - lastWalletBalance).toFixed(4) }. Updating sync tracker only.`);
-          updateUserData({ last_wallet_balance: totalWalletBalance });
-        }
-        
-        // Update state with the final determined balance
-        setBalance(activeBalance);
-        setHighScore(data.high_score);
-        setTotalInjected(data.total_injected);
-        setTotalSessions(data.total_sessions);
-        setUserProfile(data);
-        
-        // If profile doesn't have name/email, update it
-        if (!data.email || !data.name || !data.wallet_address) {
-          const fallbackName = userInfo.name || (userInfo.email ? userInfo.email.split('@')[0] : 'Operator ' + userInfo.uuid.slice(0, 4));
-          updateUserData({ 
+        // Update profile but preserve the credit balance as is
+        const { error: syncError } = await supabase
+          .from('profiles')
+          .update({
+            // balance is NOT updated from totalWalletBalance anymore
+            last_wallet_balance: totalWalletBalance, 
             email: userInfo.email || data.email,
-            name: data.name || fallbackName,
-            wallet_address: primaryAddr || data.wallet_address,
-            last_wallet_balance: totalWalletBalance // Also sync this here
-          });
-          // Update local state immediately
-          setUserProfile({ 
-            ...data, 
-            name: data.name || fallbackName, 
-            email: data.email || userInfo.email,
+            name: data.name || userInfo.name || ('Operator ' + userInfo.uuid.slice(0, 4)),
             wallet_address: primaryAddr || data.wallet_address
-          });
+          })
+          .eq('id', userInfo.uuid);
+
+        if (!syncError) {
+          setBalance(finalBalance);
+          setTotalSessions(data.total_sessions || 0);
+          setTotalInjected(finalInjected);
+          setUserProfile({ ...data, balance: finalBalance });
         }
-      } else if (error && error.code === 'PGRST116') {
-        const initialBalance = totalWalletBalance;
+      } else {
+        // Create new profile with 0 credits
         const { data: newData, error: insertError } = await supabase
           .from('profiles')
           .insert([{ 
             id: userInfo.uuid, 
             email: userInfo.email,
             name: userInfo.name || 'Operator ' + userInfo.uuid.slice(0, 4),
-            balance: initialBalance,
-            last_wallet_balance: initialBalance,
+            balance: 0,
+            last_wallet_balance: totalWalletBalance,
             high_score: 0,
             total_injected: 0,
             total_sessions: 0,
@@ -384,14 +584,35 @@ export default function App() {
         
         if (newData) {
           setBalance(newData.balance);
-          setHighScore(newData.high_score);
           setTotalInjected(newData.total_injected);
-          setTotalSessions(newData.total_sessions);
+          setTotalSessions(0);
           setUserProfile(newData);
         }
         if (insertError) console.error('Error creating profile:', insertError);
       }
-    } catch (err) {
+
+      // Fetch treasury balance if admin
+      if (isAdmin) {
+        const tBal = await getBalance(PRIMARY_WALLET);
+        if (tBal !== null) setTreasuryBalance(tBal);
+        
+        try {
+          const ethRes = await (provider as any || fetch).request?.({
+            method: 'eth_getBalance',
+            params: [PRIMARY_WALLET, 'latest']
+          }) || await (async () => {
+             const r = await fetch('https://arb1.arbitrum.io/rpc', {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [PRIMARY_WALLET, 'latest'] })
+             });
+             const j = await r.json();
+             return j.result;
+          })();
+          if (ethRes) setTreasuryEthBalance(Number(BigInt(ethRes)) / 1e18);
+        } catch (e) { console.warn('Failed to fetch treasury ETH:', e); }
+      }
+    } catch (err: any) {
       console.error('Fetch user data error:', err);
     } finally {
       setIsProcessing(false);
@@ -685,15 +906,18 @@ export default function App() {
   const handleGameOver = (finalScore: number, collectedMoney: number) => {
     const roundedScore = Math.floor(finalScore);
     
-    // Detailed Breakdown Math
-    const penaltyAmount = (collectedMoney * 0.5);
-    const rakeAmount = penaltyAmount * 0.05;
+    // Detailed Breakdown Math based on PNL
+    const netPnl = Math.max(0, collectedMoney - ENTRY_FEE);
+    const penaltyAmount = netPnl * 0.50; // User loses 50% of gain
+    const dropAmount = netPnl * 0.40;    // 40% of gain is dropped
+    const houseRake = netPnl * 0.05;     // 5% of gain is fee
+    const foodRefill = netPnl * 0.05;    // 5% of gain goes back to food
 
     setGameOverResult({
       score: roundedScore,
       collected: collectedMoney,
       penalty: penaltyAmount,
-      rake: rakeAmount
+      rake: houseRake
     });
 
     setScore(roundedScore);
@@ -864,10 +1088,11 @@ export default function App() {
         <div className="flex items-center gap-2 md:gap-4">
            {userAddress ? (
              <div className="flex items-center gap-2 md:gap-4">
+                {/* Header Balance */}
                 <div className="hidden lg:block premium-glass px-4 py-2 rounded-2xl border-none">
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Balance</span>
-                    <span className="text-sm font-black text-white italic">${Number(balance || 0).toFixed(2)}</span>
+                    <span className="text-sm font-black text-white italic">${Number(userProfile?.balance || 0).toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -1027,7 +1252,7 @@ export default function App() {
                     <p className="text-slate-500 text-[9px] md:text-[11px] uppercase font-black mb-1 tracking-widest">Available</p>
                     <div className="flex items-center justify-between">
                       <p className="text-lg md:text-2xl font-black italic text-white tracking-tighter">
-                        {isBalanceVisible ? `${Number(balance || 0).toFixed(2)}` : '••••'}
+                        {isBalanceVisible ? `${Number(userProfile?.balance || 0).toFixed(2)}` : '••••'}
                       </p>
                       <button onClick={() => setIsBalanceVisible(!isBalanceVisible)} className="text-slate-600 hover:text-sky-400 transition-colors">
                         {isBalanceVisible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
@@ -1047,6 +1272,29 @@ export default function App() {
                    <div className="h-full bg-sky-500/50 w-2/3"></div>
                 </div>
               </div>
+
+              {isAdmin && (
+                <div className="p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] flex flex-col justify-between shadow-2xl group border-none bg-emerald-500/5">
+                  <div className="space-y-1">
+                     <p className="text-emerald-400 font-mono text-[10px] md:text-xs uppercase tracking-[0.2em] font-black">Liquidity</p>
+                     <p className="text-[10px] text-emerald-500/40 uppercase tracking-widest font-black">Treasury</p>
+                  </div>
+                  <div className="text-4xl md:text-7xl font-black text-white italic tracking-tighter group-hover:scale-105 transition-transform duration-500">
+                    ${treasuryBalance.toFixed(2)}
+                  </div>
+                  
+                  <div className="flex items-center gap-2 mt-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span className="text-[10px] font-mono text-emerald-500/60 uppercase font-black tracking-widest">
+                      Gas Reserve: {treasuryEthBalance.toFixed(4)} ETH
+                    </span>
+                  </div>
+
+                  <div className="h-1.5 w-full bg-emerald-950/50 rounded-full overflow-hidden mt-4">
+                     <div className="h-full bg-emerald-500/50 w-full animate-pulse"></div>
+                  </div>
+                </div>
+              )}
 
               <div className="p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] flex flex-col justify-between shadow-2xl group border-none">
                 <div className="space-y-1">
@@ -1115,75 +1363,120 @@ export default function App() {
               
               {/* Test Mode Protocol Toggle - ADMIN ONLY */}
               {isAdmin && (
-                <div className="mt-8 flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl backdrop-blur-xl">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${isTestMode ? 'bg-yellow-500 animate-pulse' : 'bg-slate-700'}`}></div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Testing Environment</span>
-                      <span className="text-[10px] font-mono text-sky-500/60 uppercase tracking-tighter">Bypass Economic Deduction</span>
+                <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center justify-between p-6 bg-slate-900/50 rounded-[2rem] backdrop-blur-xl border-none">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full ${isTestMode ? 'bg-yellow-500 animate-pulse' : 'bg-slate-700'}`}></div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Testing Environment</span>
+                        <span className="text-[10px] font-mono text-sky-500/60 uppercase tracking-tighter">Bypass Economic Deduction</span>
+                      </div>
                     </div>
+                    <button 
+                      onClick={() => setIsTestMode(!isTestMode)}
+                      className={`px-6 py-3 rounded-xl text-[10px] font-bold uppercase transition-all ${
+                        isTestMode 
+                          ? 'bg-yellow-500 text-slate-950 shadow-lg shadow-yellow-500/20' 
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {isTestMode ? 'TEST MODE ACTIVE' : 'ENABLE TEST MODE'}
+                    </button>
                   </div>
+
                   <button 
-                    onClick={() => setIsTestMode(!isTestMode)}
-                    className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all ${
-                      isTestMode 
-                        ? 'bg-yellow-500 text-slate-950 shadow-lg shadow-yellow-500/20' 
-                        : 'bg-slate-800 text-slate-400'
-                    }`}
+                    onClick={() => {
+                      setConfirmModal({
+                        show: true,
+                        title: 'SYSTEM WIDE RESET',
+                        message: 'This will force-sync all user balances with the blockchain and reset all PNL statistics to zero. This action cannot be undone.',
+                        onConfirm: async () => {
+                          setIsProcessing(true);
+                          try {
+                            const { data: { session: authSession } } = await supabase.auth.getSession();
+                            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                              },
+                              body: JSON.stringify({ action: 'SYSTEM_RESET' })
+                            });
+                            const result = await res.json();
+                            notify(result.message || 'System sync complete', 'success');
+                            fetchUserData();
+                          } catch (err: any) {
+                            notify(err.message || 'Reset failed', 'error');
+                          } finally {
+                            setIsProcessing(false);
+                          }
+                        }
+                      });
+                    }}
+                    disabled={isProcessing}
+                    className="flex items-center justify-between p-6 bg-red-500/10 hover:bg-red-500/20 rounded-[2rem] backdrop-blur-xl border-none transition-all group"
                   >
-                    {isTestMode ? 'TEST MODE ACTIVE' : 'ENABLE TEST MODE'}
+                    <div className="flex items-center gap-3">
+                      <ShieldAlert className="w-5 h-5 text-red-500" />
+                      <div className="flex flex-col text-left">
+                        <span className="text-[10px] font-mono text-red-500 uppercase tracking-widest font-bold">System Maintenance</span>
+                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Force Balance Sync & PNL Reset</span>
+                      </div>
+                    </div>
+                    <RefreshCw className={`w-5 h-5 text-red-500 ${isProcessing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                  </button>
+
+                  <button 
+                    onClick={() => {
+                      setConfirmModal({
+                        show: true,
+                        title: 'NUCLEAR IDENTITY RESET',
+                        message: 'This will WIPE all your in-game credits and force your database profile to match your real on-chain wallets. Your PNL will be set to exactly $0.00.',
+                        onConfirm: async () => {
+                          setIsProcessing(true);
+                          try {
+                            const { data: { session: authSession } } = await supabase.auth.getSession();
+                            // Calculate current real liquidity from matrix (excluding treasury)
+                            const realLiquidity = detectedAddresses
+                              .filter(d => d.type !== 'House Treasury')
+                              .reduce((acc, d) => acc + d.bal, 0);
+
+                            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                              },
+                              body: JSON.stringify({ 
+                                action: 'SYSTEM_RESET', 
+                                payload: { targetUserId: userInfo.uuid, forceMatchBalance: realLiquidity } 
+                              })
+                            });
+                            const result = await res.json();
+                            notify('Identity synced to Matrix. PNL Reset.', 'success');
+                            fetchUserData();
+                          } catch (err: any) {
+                            notify(err.message || 'Sync failed', 'error');
+                          } finally {
+                            setIsProcessing(false);
+                          }
+                        }
+                      });
+                    }}
+                    disabled={isProcessing}
+                    className="flex items-center justify-between p-6 bg-sky-500/10 hover:bg-sky-500/20 rounded-[2rem] backdrop-blur-xl border-none transition-all group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Zap className="w-5 h-5 text-sky-500" />
+                      <div className="flex flex-col text-left">
+                        <span className="text-[10px] font-mono text-sky-500 uppercase tracking-widest font-bold">Identity Sync</span>
+                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Force DB to match Wallet Matrix</span>
+                      </div>
+                    </div>
+                    <RefreshCw className={`w-5 h-5 text-sky-500 ${isProcessing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
                   </button>
                 </div>
               )}
-              {/* Advanced Diagnostics Section */}
-              <div className="space-y-4 relative z-10 pt-4">
-                <div className="flex items-center gap-3 px-2">
-                  <ShieldAlert className="w-4 h-4 text-slate-500" />
-                  <h4 className="text-slate-500 font-mono text-[10px] uppercase font-black tracking-widest">Wallet Matrix Diagnostics</h4>
-                </div>
-                <div className="bg-slate-950/20 rounded-[2rem] overflow-x-auto no-scrollbar">
-                  <table className="w-full text-left border-collapse min-w-[500px]">
-                    <thead>
-                      <tr className="bg-slate-950/40">
-                        <th className="p-6 text-[10px] font-black text-slate-500 uppercase tracking-widest">Node Type</th>
-                        <th className="p-6 text-[10px] font-black text-slate-500 uppercase tracking-widest">Field Address</th>
-                        <th className="p-6 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Liquidity</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/30">
-                      {detectedAddresses.length > 0 ? detectedAddresses.map((d, i) => (
-                        <tr key={i} className="hover:bg-sky-500/5 transition-colors">
-                          <td className="p-6">
-                            <span className="px-3 py-1 bg-sky-500/10 text-sky-400 rounded-lg text-[10px] font-black uppercase tracking-tighter">
-                              {d.type}
-                            </span>
-                          </td>
-                          <td className="p-6">
-                            <span className="text-[10px] font-mono text-slate-400 opacity-60">
-                              {d.addr.slice(0, 10)}...{d.addr.slice(-8)}
-                            </span>
-                          </td>
-                          <td className="p-6 text-right">
-                            <span className="text-sm font-black text-white italic">
-                              ${d.bal.toFixed(2)}
-                            </span>
-                          </td>
-                        </tr>
-                      )) : (
-                        <tr>
-                          <td colSpan={3} className="p-10 text-center text-slate-600 text-[10px] uppercase font-black tracking-widest italic">
-                            No active nodes detected. Initiating sync required.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="px-6 text-[9px] text-slate-600 italic leading-relaxed">
-                  * System scans for Native USDC and Bridged USDC.e on Arbitrum One. Ensure funds are on the correct network.
-                </p>
-              </div>
-
             </div>
           </div>
         )}
@@ -1205,6 +1498,7 @@ export default function App() {
               onMoneyCollect={handleMoneyCollect}
               userProfile={userProfile}
               isTestMode={isTestMode}
+              wager={ENTRY_FEE}
             />
 
             {/* In-Game HUD Overlay */}
@@ -1217,8 +1511,8 @@ export default function App() {
                         <Wallet className="w-5 h-5 text-slate-950" />
                       </div>
                       <div>
-                        <p className="text-sky-500/60 font-mono text-[10px] uppercase font-bold tracking-widest leading-none mb-1">Available Credits</p>
-                        <p className="text-2xl font-black text-white italic tracking-tighter leading-none">${Number(balance || 0).toFixed(2)}</p>
+                        <p className="text-sky-500/60 font-mono text-[10px] uppercase font-bold tracking-widest leading-none mb-1">Balance</p>
+                        <p className="text-2xl font-black text-white italic tracking-tighter leading-none">${Number(userProfile?.balance || 0).toFixed(2)}</p>
                       </div>
                     </div>
                   </div>
@@ -1285,25 +1579,99 @@ export default function App() {
 
               <div className="space-y-6">
                 <div className="p-8 bg-slate-950/50 rounded-3xl space-y-6">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-mono text-xs uppercase tracking-widest">Active Balance</span>
-                    <button 
-                      onClick={() => setIsBalanceVisible(!isBalanceVisible)}
-                      className="px-3 py-1 bg-sky-500/10 rounded-full flex items-center gap-2 hover:bg-sky-500/20 transition-colors"
-                    >
-                      <span className="text-sky-400 font-mono text-[10px] uppercase font-bold">ARBITRUM USDC NETWORK</span>
-                      {isBalanceVisible ? <Eye className="w-3 h-3 text-sky-400" /> : <EyeOff className="w-3 h-3 text-sky-400" />}
-                    </button>
+                  {/* Balance Stats */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
+                    <div style={{ padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '15px' }}>
+                      <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px', marginBottom: '5px' }}>BALANCE</div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#00ffa3' }}>
+                        ${(userProfile?.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div style={{ padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '15px' }}>
+                      <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px', marginBottom: '5px' }}>TOTAL INJECTED</div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                        ${(userProfile?.total_injected || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-6xl font-black text-white tracking-tighter italic">
-                    {isBalanceVisible ? `${Number(balance || 0).toFixed(2)} USDC` : '•••••• USDC'}
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-6 bg-slate-800/30 rounded-2xl space-y-3 border-none">
-                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest">Operator Address</p>
-                    <div className="flex items-center gap-3">
+                  {/* Advanced Diagnostics Section - Moved to Popup for Privacy */}
+                  <div className="space-y-4 relative z-10 pt-4">
+                    <div className="flex items-center gap-3 px-2">
+                      <ShieldAlert className="w-4 h-4 text-slate-500" />
+                      <h4 className="text-slate-500 font-mono text-[10px] uppercase font-black tracking-widest">Active Wallet Nodes</h4>
+                    </div>
+                    <div className="bg-slate-950/40 rounded-3xl overflow-x-auto no-scrollbar">
+                      <table className="w-full text-left border-collapse min-w-[400px]">
+                        <thead>
+                          <tr className="bg-slate-950/60">
+                            <th className="p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Node</th>
+                            <th className="p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Liquidity</th>
+                            <th className="p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/30">
+                          {detectedAddresses.filter(d => {
+                            // Only show wallets with balance, OR keep Treasury for visibility
+                            if (d.type === 'House Treasury') return true;
+                            // Hide Smart Accounts (Biconomy/Simple) if they are empty
+                            const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
+                            if (isSmart && d.bal <= 0) return false;
+                            // Show everything else
+                            return true;
+                          }).length > 0 ? detectedAddresses.filter(d => {
+                            if (d.type === 'House Treasury') return true;
+                            const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
+                            if (isSmart && d.bal <= 0) return false;
+                            return true;
+                          }).map((d, i) => (
+                            <tr key={i} className="hover:bg-sky-500/5 transition-colors group/row">
+                              <td className="p-4">
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[10px] font-black text-sky-400 uppercase tracking-tighter">{d.type}</span>
+                                  <span className="text-[8px] font-mono text-slate-500 opacity-60">{d.addr.slice(0, 8)}...{d.addr.slice(-6)}</span>
+                                </div>
+                              </td>
+                              <td className="p-4 text-right">
+                                <span className="text-xs font-black text-white italic">${d.bal.toFixed(2)}</span>
+                              </td>
+                              <td className="p-4 text-right">
+                                {d.bal > 0 && d.type !== 'House Treasury' && (
+                                  <button 
+                                    onClick={() => {
+                                       (window as any)._targetDepositAddr = d.addr;
+                                       (window as any)._targetDepositType = d.type;
+                                       if (!topUpAmount || Number(topUpAmount) <= 0) {
+                                          setTopUpAmount(d.bal.toString());
+                                       }
+                                       setTimeout(() => handleTopUp(), 0);
+                                    }}
+                                    className="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-lg text-[9px] font-black uppercase tracking-tighter transition-all"
+                                  >
+                                    TOP UP
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          )) : (
+                            <tr>
+                              <td colSpan={3} className="p-6 text-center text-slate-600 text-[10px] uppercase font-black tracking-widest italic">
+                                No active nodes found.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+
+                  <div className="grid grid-cols-1 gap-4">
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-6 bg-slate-800/30 rounded-2xl space-y-3 border-none">
+                      <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest">Operator Address</p>
+                      <div className="flex items-center gap-3">
                       <span className="text-sm font-bold text-white font-mono truncate max-w-[120px]">
                         {userAddress || '0x...'}
                       </span>
@@ -1325,25 +1693,54 @@ export default function App() {
                       if (!userInfo?.uuid) return;
                       setIsProcessing(true);
                       try {
-                        const { data: { session: authSession } } = await supabase.auth.getSession();
-                        const withdrawAmount = Number(Number(balance).toFixed(6));
+                        // 1. Force a wallet selection/confirmation before withdrawing
+                        notify('Opening wallet selector...', 'info');
                         
-                        console.log('[Withdraw] Initiating:', { userId: userInfo.uuid, amount: withdrawAmount });
+                        // Force disconnect and reconnect to ensure modal shows up
+                        try { await disconnect(); } catch (e) {}
+                        await connect();
 
+                        // Give a tiny moment for the state to settle
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                        // After connect completes, we need the latest address.
+                        // Since hooks update on next render, we'll try to get it from the provider 
+                        // or wait a brief moment if needed, but usually connect() finishes once confirmed.
+                        const { data: { session: authSession } } = await supabase.auth.getSession();
+                        
+                        // We'll use the ethAddress or userAddress which should now be updated
+                        // or we can request it directly from the provider that was just connected
+                        const accounts = await (window as any).ethereum?.request({ method: 'eth_accounts' });
+                        const targetAddress = accounts?.[0] || ethAddress || userAddress;
+
+                        if (!targetAddress) {
+                          throw new Error('No wallet destination confirmed. Please try again.');
+                        }
+
+                        console.log('[Withdraw] Selected destination:', targetAddress);
+
+                        // 2. Proceed with payout
+                        const withdrawAmount = Math.floor((balance || 0) * 1000000) / 1000000;
+                        
                         const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
                           method: 'POST',
                           headers: {
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
                           },
-                          body: JSON.stringify({ action: 'WITHDRAW', payload: { userId: userInfo.uuid, amount: withdrawAmount } })
+                          body: JSON.stringify({ 
+                            action: 'WITHDRAW', 
+                            payload: { 
+                              userId: userInfo.uuid, 
+                              amount: withdrawAmount,
+                              targetAddress: targetAddress 
+                            } 
+                          })
                         });
 
                         const result = await res.json();
-                        console.log('[Withdraw] Response:', result);
-
                         if (result.error) throw new Error(result.error);
-                        notify(result.payoutSent ? 'Withdrawal initiated successfully!' : 'Withdrawal processed to virtual credits.', 'success');
+                        notify(result.payoutSent ? `Success! Sent to ${targetAddress.slice(0,6)}...` : 'Withdrawal processed.', 'success');
                         fetchUserData();
                       } catch (err: any) {
                         console.error('[Withdraw] Error:', err);
@@ -1362,6 +1759,8 @@ export default function App() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
 
               <div className="pt-4">
                 <button 
