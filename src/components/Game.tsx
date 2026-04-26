@@ -215,7 +215,10 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'drops' }, payload => {
         const drop = payload.new;
         dropsRef.current.push({
-          id: drop.id, x: drop.x, y: drop.y, color: '#34D399', value: 5,
+          id: drop.id, 
+          x: Math.max(40, Math.min(WORLD_SIZE - 40, drop.x)), 
+          y: Math.max(40, Math.min(WORLD_SIZE - 40, drop.y)), 
+          color: '#34D399', value: 5,
           moneyValue: Number(drop.money_value), isDrop: true
         });
       })
@@ -229,7 +232,10 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
     supabase.from('drops').select('*').is('claimed_by', null).then(({ data }) => {
       if (data) {
         dropsRef.current = data.map(d => ({
-          id: d.id, x: d.x, y: d.y, color: '#34D399', value: 5,
+          id: d.id, 
+          x: Math.max(40, Math.min(WORLD_SIZE - 40, d.x)), 
+          y: Math.max(40, Math.min(WORLD_SIZE - 40, d.y)), 
+          color: '#34D399', value: 5,
           moneyValue: Number(d.money_value), isDrop: true
         }));
       }
@@ -242,10 +248,14 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
 
     const spawnFood = (x?: number, y?: number, val?: number, moneyVal?: number, customColor?: string) => {
         const colors = ['#38BDF8', '#818CF8', '#C084FC', '#F472B6', '#FB7185', '#FBBF24', '#34D399'];
+        // Use a 40px buffer to ensure it's comfortably inside the border
+        const safeX = Math.max(40, Math.min(WORLD_SIZE - 40, x ?? Math.random() * WORLD_SIZE));
+        const safeY = Math.max(40, Math.min(WORLD_SIZE - 40, y ?? Math.random() * WORLD_SIZE));
+        
         const food = {
             id: Math.random().toString(36),
-            x: Math.max(20, Math.min(WORLD_SIZE - 20, x ?? Math.random() * WORLD_SIZE)),
-            y: Math.max(20, Math.min(WORLD_SIZE - 20, y ?? Math.random() * WORLD_SIZE)),
+            x: safeX,
+            y: safeY,
             color: customColor ?? colors[Math.floor(Math.random() * colors.length)],
             value: val ?? 1,
             moneyValue: moneyVal ?? 0.01,

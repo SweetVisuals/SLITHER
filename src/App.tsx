@@ -539,263 +539,6 @@ export default function App() {
     discoverAddresses();
   }, [connectionStatus, userInfo?.uuid, provider, ethAddress]);
 
-  const fetchUserData = useCallback(async (forcedAddressInput?: string | any, retryCount = 0, aaExtras?: { biconomyAddress?: string, simpleAddress?: string }) => {
-    if (!userInfo?.uuid) return;
-    
-    // Ensure forcedAddress is a string (prevents event objects from leaking in)
-    const forcedAddress = typeof forcedAddressInput === 'string' ? forcedAddressInput : undefined;
-    
-    try {
-      setIsProcessing(true);
-      
-      // Only retry if an EVM wallet is null (Solana is often null if not used)
-      const hasNullEVMWallet = userInfo.wallets?.some((w: any) => 
-        (w.chain_name?.toLowerCase().includes('evm') || !w.chain_name) && !w.public_address
-      );
-      if (hasNullEVMWallet && retryCount < 5) {
-        console.log(`[Diagnostic] Null EVM wallet address detected. Retrying fetch in 1.5s... (${retryCount + 1}/5)`);
-        setTimeout(() => fetchUserData(forcedAddress, retryCount + 1), 1500);
-        return;
-      }
-      
-      // Shared balance fetch logic
-      const getBalance = async (targetAddr: any) => {
-        if (!targetAddr || typeof targetAddr !== 'string' || targetAddr === 'null') {
-          return 0;
-        }
-
-        // Only process EVM addresses
-        if (!targetAddr.startsWith('0x') || targetAddr.length !== 42) {
-          console.log(`[Diagnostic] Skipping non-EVM address: ${targetAddr}`);
-          return 0;
-        }
-        
-        console.log(`[Diagnostic] Checking balance for: ${targetAddr}`);
-        const callData = '0x70a08231' + targetAddr.replace('0x', '').padStart(64, '0');
-        const publicRpc = 'https://arb1.arbitrum.io/rpc';
-        
-        const fetchCall = async (contract: string) => {
-          try {
-            // Prioritize authenticated provider to bypass CORS/rate-limits
-            if (provider) {
-              const res = await (provider as any).request({
-                method: 'eth_call',
-                params: [{ to: contract, data: callData }, 'latest']
-              });
-              return res;
-            }
-
-            const response = await fetch(publicRpc, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: '2.0',
-                method: 'eth_call',
-                params: [{ to: contract, data: callData }, 'latest'],
-                id: 1
-              })
-            });
-            if (!response.ok) {
-              console.warn(`[BalanceCheck] RPC error ${response.status} for ${contract}`);
-              return null;
-            }
-            const res = await response.json();
-            if (res.error) {
-              console.warn(`[BalanceCheck] RPC returned error for ${contract}:`, res.error);
-              return null;
-            }
-            return res.result;
-          } catch (e) {
-            console.error(`[BalanceCheck] Request failed for ${contract}:`, e);
-            return null;
-          }
-        };
-
-        const hexNative = await fetchCall(USDC_ADDRESS);
-        const hexBridged = await fetchCall(USDC_E_ADDRESS);
-        
-        if (hexNative === null || hexBridged === null) return null;
-
-        let total = 0;
-        if (hexNative && hexNative !== '0x' && hexNative.length > 10) {
-          total += Number(BigInt(hexNative)) / 10 ** USDC_DECIMALS;
-        }
-        if (hexBridged && hexBridged !== '0x' && hexBridged.length > 10) {
-          total += Number(BigInt(hexBridged)) / 10 ** USDC_E_DECIMALS;
-        }
-        
-        if (total > 0) {
-          console.log(`[BalanceCheck] Found ${total.toFixed(2)} USDC at ${targetAddr}`);
-        }
-        return total;
-      };
-
-      // 1. Identify all unique addresses to scan (Smart Account, EOA, and fallbacks)
-      const scanSet = new Set<string>();
-      if (userAddress) scanSet.add(userAddress);
-      if (forcedAddress) scanSet.add(forcedAddress);
-      if (ethAddress) scanSet.add(ethAddress);
-      if (aaExtras?.biconomyAddress) scanSet.add(aaExtras.biconomyAddress);
-      if (aaExtras?.simpleAddress) scanSet.add(aaExtras.simpleAddress);
-      if ((userInfo as any).biconomyV1Address) scanSet.add((userInfo as any).biconomyV1Address);
-      if ((userInfo as any).simpleV2Address) scanSet.add((userInfo as any).simpleV2Address);
-      
-      if ((userInfo as any).public_address) scanSet.add((userInfo as any).public_address);
-      
-      // Also grab from Particle's nested wallet list
-      const pWallets = userInfo.wallets || [];
-      pWallets.forEach((w: any) => {
-        if (w.public_address && w.public_address !== 'null') scanSet.add(w.public_address);
-      });
-
-      // Check provider accounts directly as a fallback
-      if (provider) {
-        try {
-          const pAccounts = await (provider as any).request({ method: 'eth_accounts' });
-          if (pAccounts && Array.isArray(pAccounts)) {
-            pAccounts.forEach((a: string) => {
-              if (a && typeof a === 'string' && a !== 'null') scanSet.add(a);
-            });
-          }
-          
-          // Try to specifically request the smart account via Particle-specific RPC
-          try {
-            const aaAccount = await (provider as any).request({ method: 'particle_aa_getSmartAccount' });
-            if (aaAccount && typeof aaAccount === 'string') scanSet.add(aaAccount);
-            if (Array.isArray(aaAccount)) aaAccount.forEach((a: any) => {
-              if (a?.smartAccountAddress) scanSet.add(a.smartAccountAddress);
-            });
-          } catch (aaErr) {
-            // This might fail if the method isn't supported, which is fine
-          }
-        } catch (e) {
-          console.warn('[Diagnostic] Failed to fetch provider accounts:', e);
-        }
-      }
-
-      console.log(`[Diagnostic] Aggregating assets for ${scanSet.size} addresses:`, Array.from(scanSet));
-      
-      let totalWalletBalance = 0;
-      let hasError = false;
-      const newDetected: {addr: string, bal: number, type: string}[] = [];
-      
-      for (const addr of scanSet) {
-        if (!addr || typeof addr !== 'string' || addr.length < 20 || addr === 'null') continue;
-        const bal = await getBalance(addr);
-        if (bal === null) {
-          hasError = true;
-          continue;
-        }
-        console.log(`[Diagnostic] Balance for ${addr}: ${bal}`);
-        totalWalletBalance += bal;
-        
-        // Determine type for diagnostic display
-        let type = 'EOA/External';
-        if (aaExtras?.biconomyAddress && addr === aaExtras.biconomyAddress) type = 'Biconomy V2';
-        else if (addr === (userInfo as any).biconomyV1Address) type = 'Biconomy V1';
-        else if (aaExtras?.simpleAddress && addr === aaExtras.simpleAddress) type = 'Simple AA V1';
-        else if (addr === (userInfo as any).simpleV2Address) type = 'Simple AA V2';
-        else if (userInfo.wallets?.some((w: any) => w.public_address === addr)) type = 'Linked Particle';
-        
-        newDetected.push({ addr, bal, type });
-      }
-      setDetectedAddresses(newDetected);
-
-      console.log(`[Diagnostic] Total Aggregate Wallet Balance: ${totalWalletBalance}`);
-      
-      // Update local address if not set
-      const primaryAddr = forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
-      if (primaryAddr && !userAddress) setUserAddress(primaryAddr);
-
-      // Fetch treasury balance if admin (check email OR wallet)
-      const currentAddress = primaryAddr;
-      if (userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || currentAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') {
-        const tBal = await getBalance(PRIMARY_WALLET);
-        if (tBal !== null) setTreasuryBalance(tBal);
-      }
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userInfo.uuid)
-        .single();
-
-      if (data) {
-        let activeBalance = Number(data.balance) || 0;
-        const lastWalletBalance = Number(data.last_wallet_balance) || 0;
-        
-        // ADDITIVE SYNC LOGIC:
-        // Instead of overwriting, we calculate the delta of the wallet since last check.
-        // This preserves in-game virtual credits (collections/buy-ins) while picking up
-        // external deposits or withdrawals.
-        if (!hasError && Math.abs(totalWalletBalance - lastWalletBalance) > 0.0001) {
-          const delta = totalWalletBalance - lastWalletBalance;
-          console.log(`[Sync] Wallet shifted by ${delta.toFixed(4)}. Updating DB balance...`);
-          activeBalance += delta;
-          if (activeBalance < 0) activeBalance = 0;
-          updateUserData({ 
-            balance: activeBalance, 
-            last_wallet_balance: totalWalletBalance 
-          });
-        }
-        
-        // Update state with the final determined balance
-        setBalance(activeBalance);
-        setHighScore(data.high_score);
-        setTotalInjected(data.total_injected);
-        setTotalSessions(data.total_sessions);
-        setUserProfile(data);
-        
-        // If profile doesn't have name/email, update it
-        if (!data.email || !data.name || !data.wallet_address) {
-          const fallbackName = userInfo.name || (userInfo.email ? userInfo.email.split('@')[0] : 'Operator ' + userInfo.uuid.slice(0, 4));
-          updateUserData({ 
-            email: userInfo.email || data.email,
-            name: data.name || fallbackName,
-            wallet_address: primaryAddr || data.wallet_address,
-            last_wallet_balance: totalWalletBalance // Also sync this here
-          });
-          // Update local state immediately
-          setUserProfile({ 
-            ...data, 
-            name: data.name || fallbackName, 
-            email: data.email || userInfo.email,
-            wallet_address: primaryAddr || data.wallet_address
-          });
-        }
-      } else if (error && error.code === 'PGRST116') {
-        const initialBalance = totalWalletBalance;
-        const { data: newData, error: insertError } = await supabase
-          .from('profiles')
-          .insert([{ 
-            id: userInfo.uuid, 
-            email: userInfo.email,
-            name: userInfo.name || 'Operator ' + userInfo.uuid.slice(0, 4),
-            balance: initialBalance,
-            last_wallet_balance: initialBalance,
-            high_score: 0,
-            total_injected: 0,
-            total_sessions: 0,
-            wallet_address: primaryAddr
-          }])
-          .select()
-          .single();
-        
-        if (newData) {
-          setBalance(newData.balance);
-          setHighScore(newData.high_score);
-          setTotalInjected(newData.total_injected);
-          setTotalSessions(newData.total_sessions);
-          setUserProfile(newData);
-        }
-        if (insertError) console.error('Error creating profile:', insertError);
-      }
-    } catch (err) {
-      console.error('Fetch user data error:', err);
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [userInfo?.uuid, userAddress, provider, ethAddress]);
 
   const handleDemoTopup = async () => {
     if (!userInfo?.uuid) return;
@@ -1452,6 +1195,55 @@ export default function App() {
               userProfile={userProfile}
               isTestMode={isTestMode}
             />
+
+            {/* In-Game HUD Overlay */}
+            <div className="absolute inset-0 z-[2100] pointer-events-none p-6 md:p-10 flex flex-col justify-between">
+              <div className="flex justify-between items-start">
+                <div className="space-y-4">
+                  <div className="premium-glass p-6 rounded-[2rem] border-none shadow-2xl">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-sky-500 rounded-xl flex items-center justify-center shadow-lg shadow-sky-500/20">
+                        <Wallet className="w-5 h-5 text-slate-950" />
+                      </div>
+                      <div>
+                        <p className="text-sky-500/60 font-mono text-[10px] uppercase font-bold tracking-widest leading-none mb-1">Available Credits</p>
+                        <p className="text-2xl font-black text-white italic tracking-tighter leading-none">${Number(balance || 0).toFixed(2)}</p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="premium-glass p-6 rounded-[2rem] border-none shadow-2xl bg-emerald-500/5">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                        <Target className="w-5 h-5 text-slate-950" />
+                      </div>
+                      <div>
+                        <p className="text-emerald-500/60 font-mono text-[10px] uppercase font-bold tracking-widest leading-none mb-1">Session Loot</p>
+                        <p className="text-2xl font-black text-white italic tracking-tighter leading-none">+${Number(currentSessionLoot || 0).toFixed(2)}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex justify-between items-end">
+                {/* Empty div to balance bottom-left which has the mini-map on canvas */}
+                <div className="w-48 h-48 pointer-events-none"></div>
+
+                <div className="px-6 py-3 premium-glass rounded-full border-none shadow-xl bg-slate-950/40 backdrop-blur-md mb-4">
+                  <p className="text-slate-500 font-mono text-[10px] uppercase font-bold tracking-widest">
+                    Hold <span className="text-sky-400">Space</span> or <span className="text-sky-400">Click</span> to Boost
+                  </p>
+                </div>
+
+                <div className="premium-glass p-6 rounded-[2rem] border-none shadow-2xl bg-white/5">
+                  <div className="text-right">
+                    <p className="text-slate-400 font-mono text-[10px] uppercase font-bold tracking-widest leading-none mb-1">Current Mass</p>
+                    <p className="text-5xl font-black text-white italic tracking-tighter leading-none">{score}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1676,7 +1468,7 @@ export default function App() {
       {/* Game Over Summary Modal */}
       <AnimatePresence>
         {gameOverResult && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center md:p-6 bg-slate-950/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[3000] flex items-center justify-center md:p-6 bg-slate-950/60 backdrop-blur-sm">
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
