@@ -235,8 +235,14 @@ export default function App() {
       if (forcedAddress) scanSet.add(forcedAddress);
       if (userAddress) scanSet.add(userAddress);
       if (ethAddress) scanSet.add(ethAddress);
+      
+      // Add all discovered AA addresses
       if (aaExtras?.biconomyAddress) scanSet.add(aaExtras.biconomyAddress);
       if (aaExtras?.simpleAddress) scanSet.add(aaExtras.simpleAddress);
+      if ((userInfo as any).biconomyV1Address) scanSet.add((userInfo as any).biconomyV1Address);
+      if ((userInfo as any).simpleV2Address) scanSet.add((userInfo as any).simpleV2Address);
+      if ((userInfo as any).biconomyV2Address) scanSet.add((userInfo as any).biconomyV2Address);
+      if ((userInfo as any).simpleV1Address) scanSet.add((userInfo as any).simpleV1Address);
 
       // Add all wallets from Particle
       const pWallets = userInfo.wallets || [];
@@ -458,7 +464,9 @@ export default function App() {
             simpleAddress = await initSA('SIMPLE', '1.0.0');
             const simpleV2Address = await initSA('SIMPLE', '2.0.0');
             
+            if (biconomyAddress) (userInfo as any).biconomyV2Address = biconomyAddress;
             if (biconomyV1Address) (userInfo as any).biconomyV1Address = biconomyV1Address;
+            if (simpleAddress) (userInfo as any).simpleV1Address = simpleAddress;
             if (simpleV2Address) (userInfo as any).simpleV2Address = simpleV2Address;
           } catch (aaInitErr) {
             console.warn('[Diagnostic] AA SDK overall initialization failed:', aaInitErr);
