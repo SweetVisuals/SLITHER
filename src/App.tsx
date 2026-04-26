@@ -546,7 +546,7 @@ export default function App() {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [userInfo?.uuid, userAddress, provider, ethAddress]);
 
   const handleDemoTopup = async () => {
     if (!userInfo?.uuid) return;
