@@ -208,7 +208,7 @@ Deno.serve(async (req) => {
 
       const { data: profile, error: profileError } = await supabaseClient
         .from('profiles')
-        .select('balance, wallet_address, last_wallet_balance')
+        .select('balance, wallet_address, total_withdrawn')
         .eq('id', userId)
         .single();
         
@@ -267,7 +267,7 @@ Deno.serve(async (req) => {
           .from('profiles')
           .update({ 
             balance: currentBalance - finalWithdrawAmount,
-            last_wallet_balance: (Number(profile.last_wallet_balance) || 0) + finalWithdrawAmount
+            total_withdrawn: (Number(profile.total_withdrawn) || 0) + finalWithdrawAmount
           })
           .eq('id', userId);
         if (updateError) throw updateError;
@@ -359,14 +359,13 @@ Deno.serve(async (req) => {
       const houseRake = netPnl * 0.05;
       const foodPool = netPnl * 0.05;
 
-      // Net Gain for the player (Gross Earnings - Penalty)
-      const netGain = earnings - penalty;
-      
-      // Update Game Balance: Add the net gain back to the remaining balance
+      // Since earnings were already added via COLLECT during the game,
+      // we only need to DEDUCT the penalty and rake at the end.
       const currentBalance = Number(profile.balance) || 0;
-      const newBalance = currentBalance + netGain;
+      const totalDeduction = penalty; // Rake is usually included in the penalty/distribution pool
+      const newBalance = Math.max(0, currentBalance - totalDeduction);
 
-      console.log(`[GameEngine] DIE: Earnings ${earnings}, Penalty ${penalty}, Net Gain ${netGain}, New Balance ${newBalance}`);
+      console.log(`[GameEngine] DIE: Earnings ${earnings}, Penalty to Deduct ${penalty}, New Balance ${newBalance}`);
 
       await supabaseClient
         .from('profiles')
@@ -406,10 +405,9 @@ Deno.serve(async (req) => {
 
       return new Response(JSON.stringify({ 
         penalty, 
-        netGain,
         newBalance, 
-        payoutSent: false, // No longer auto-paying on death
-        message: 'Earnings added to game balance'
+        payoutSent: false,
+        message: `Penalty of $${penalty.toFixed(4)} deducted. Final balance: $${newBalance.toFixed(4)}`
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });

@@ -76,6 +76,7 @@ export default function App() {
   const [userAddress, setUserAddress] = useState('');
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [totalInjected, setTotalInjected] = useState(0);
+  const [totalWithdrawn, setTotalWithdrawn] = useState(0);
   const [totalSessions, setTotalSessions] = useState(0);
   const [emailInput, setEmailInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -551,6 +552,7 @@ export default function App() {
       // We no longer auto-merge wallet funds. Users must explicitly "Top Up".
       let finalBalance = data?.balance || 0;
       let finalInjected = data?.total_injected || 0;
+      let finalWithdrawn = data?.total_withdrawn || 0;
 
       // Handle new users: start at 0 credits
       if (!data) {
@@ -578,6 +580,7 @@ export default function App() {
           setBalance(finalBalance);
           setTotalSessions(data.total_sessions || 0);
           setTotalInjected(finalInjected);
+          setTotalWithdrawn(finalWithdrawn);
           setUserProfile({ ...data, balance: finalBalance });
         }
       } else {
@@ -1012,7 +1015,7 @@ export default function App() {
     }
   };
 
-  const pnl = balance - totalInjected;
+  const pnl = (balance + totalWithdrawn) - totalInjected;
   const isProfitable = pnl >= 0;
 
   if (connectionStatus !== 'connected') {
@@ -1693,62 +1696,63 @@ export default function App() {
                       if (!userInfo?.uuid) return;
                       setIsProcessing(true);
                       try {
-                        // 1. Force a wallet selection/confirmation before withdrawing
-                        notify('Opening wallet selector...', 'info');
-                        
-                        // Force disconnect and reconnect to ensure modal shows up
-                        try { await disconnect(); } catch (e) {}
-                        await connect();
-
-                        // Give a tiny moment for the state to settle
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-
-                        // After connect completes, we need the latest address.
-                        // Since hooks update on next render, we'll try to get it from the provider 
-                        // or wait a brief moment if needed, but usually connect() finishes once confirmed.
+                        // 1. Use the existing established address
+                        const targetAddress = userAddress || ethAddress || (userInfo.wallets?.[0]?.public_address);
                         const { data: { session: authSession } } = await supabase.auth.getSession();
                         
-                        // We'll use the ethAddress or userAddress which should now be updated
-                        // or we can request it directly from the provider that was just connected
-                        const accounts = await (window as any).ethereum?.request({ method: 'eth_accounts' });
-                        const targetAddress = accounts?.[0] || ethAddress || userAddress;
-
                         if (!targetAddress) {
-                          throw new Error('No wallet destination confirmed. Please try again.');
+                          notify('Opening wallet selector...', 'info');
+                          await connect();
+                          return; // Let them click again once connected
                         }
 
                         console.log('[Withdraw] Selected destination:', targetAddress);
 
-                        // 2. Proceed with payout
-                        const withdrawAmount = Math.floor((balance || 0) * 1000000) / 1000000;
-                        
-                        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
-                          },
-                          body: JSON.stringify({ 
-                            action: 'WITHDRAW', 
-                            payload: { 
-                              userId: userInfo.uuid, 
-                              amount: withdrawAmount,
-                              targetAddress: targetAddress 
-                            } 
-                          })
-                        });
+                      // 2. Proceed with payout confirmation
+                      const withdrawAmount = Math.floor((balance || 0) * 1000000) / 1000000;
+                      
+                      setConfirmModal({
+                        show: true,
+                        title: 'Confirm Withdrawal',
+                        message: `Withdraw $${withdrawAmount.toFixed(2)} USDC to ${targetAddress.slice(0,6)}...${targetAddress.slice(-4)}?`,
+                        onConfirm: async () => {
+                          setIsProcessing(true);
+                          try {
+                            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                              },
+                              body: JSON.stringify({ 
+                                action: 'WITHDRAW', 
+                                payload: { 
+                                  userId: userInfo.uuid, 
+                                  amount: withdrawAmount,
+                                  targetAddress: targetAddress 
+                                } 
+                              })
+                            });
 
-                        const result = await res.json();
-                        if (result.error) throw new Error(result.error);
-                        notify(result.payoutSent ? `Success! Sent to ${targetAddress.slice(0,6)}...` : 'Withdrawal processed.', 'success');
-                        fetchUserData();
-                      } catch (err: any) {
-                        console.error('[Withdraw] Error:', err);
-                        notify(err.message || 'Withdrawal failed', 'error');
-                      } finally {
-                        setIsProcessing(false);
-                      }
-                    }}
+                            const result = await res.json();
+                            if (result.error) throw new Error(result.error);
+                            notify(result.payoutSent ? `Success! Sent to ${targetAddress.slice(0,6)}...` : 'Withdrawal processed.', 'success');
+                            fetchUserData();
+                          } catch (err: any) {
+                            console.error('[Withdraw] Error:', err);
+                            notify(err.message || 'Withdrawal failed', 'error');
+                          } finally {
+                            setIsProcessing(false);
+                          }
+                        }
+                      });
+                    } catch (err: any) {
+                      console.error('[Withdraw Setup] Error:', err);
+                      notify(err.message || 'Failed to initialize withdrawal', 'error');
+                    } finally {
+                      setIsProcessing(false);
+                    }
+                  }}
                     className="p-6 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-2xl flex items-center justify-between group transition-all border-none disabled:opacity-50"
                   >
                     <div className="text-left">
