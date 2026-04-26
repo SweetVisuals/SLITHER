@@ -1846,67 +1846,10 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="space-y-4 pt-4 border-t border-slate-800/50">
-                <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest text-center">Move Funds to Game Credits</p>
-                
-                {detectedAddresses.filter(d => d.bal > 0 && d.type !== 'House Treasury').length > 0 ? (
-                  <div className="space-y-3">
-                    {detectedAddresses.filter(d => d.bal > 0 && d.type !== 'House Treasury').map((node, i) => (
-                      <div key={i} className="p-4 bg-slate-950/50 rounded-2xl border border-emerald-500/10 flex flex-col gap-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-emerald-500/10 rounded-lg flex items-center justify-center">
-                              <Wallet className="w-4 h-4 text-emerald-500" />
-                            </div>
-                            <div>
-                              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight">{node.type}</p>
-                              <p className="text-[10px] text-white font-mono">{node.addr.slice(0, 6)}...{node.addr.slice(-4)}</p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs font-black text-emerald-400">${node.bal.toFixed(2)}</p>
-                            <p className="text-[8px] text-slate-500 font-bold uppercase">Available</p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex gap-2">
-                          <input 
-                            type="number" 
-                            placeholder="Amount..."
-                            value={topUpAmount}
-                            onChange={(e) => setTopUpAmount(e.target.value)}
-                            className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500 transition-all font-mono"
-                          />
-                          <button 
-                            onClick={() => {
-                              (window as any)._targetDepositAddr = node.addr;
-                              (window as any)._targetDepositType = node.type;
-                              handleTopUp();
-                            }}
-                            disabled={isProcessing || !topUpAmount || Number(topUpAmount) <= 0}
-                            className="px-6 py-2 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 disabled:hover:bg-sky-500 text-slate-950 rounded-xl font-bold text-xs uppercase tracking-tighter transition-all flex items-center gap-2"
-                          >
-                            {isProcessing ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                            Move
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-8 bg-slate-950/30 rounded-3xl border border-dashed border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
-                    <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center">
-                      <ShieldAlert className="w-6 h-6 text-slate-500" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-white">No external funds detected</p>
-                      <p className="text-xs text-slate-500 mt-1">Send USDC (Arbitrum One) to the QR address above first.</p>
-                    </div>
-                  </div>
-                )}
+              <div className="space-y-4 pt-4">
 
                 {isAdmin && (
-                  <div className="flex items-center gap-4 pt-4">
+                  <div className="flex items-center gap-4">
                     <button 
                       onClick={handleDemoTopup}
                       disabled={isProcessing}
@@ -1920,7 +1863,7 @@ export default function App() {
                 
                 <button 
                   onClick={() => setIsDepositWizardOpen(false)}
-                  className="w-full py-5 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl font-black text-xl uppercase tracking-tighter transition-all active:scale-[0.98]"
+                  className="w-full py-5 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-2xl font-black text-xl uppercase tracking-tighter shadow-lg shadow-sky-500/20 transition-all active:scale-[0.98]"
                 >
                   Done
                 </button>
