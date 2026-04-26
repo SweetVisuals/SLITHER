@@ -330,15 +330,14 @@ export default function App() {
         // Instead of overwriting, we calculate the delta of the wallet since last check.
         // This preserves in-game virtual credits (collections/buy-ins) while picking up
         // external deposits or withdrawals.
-        if (!hasError && Math.abs(totalWalletBalance - lastWalletBalance) > 0.0001) {
+        if (!hasError && (totalWalletBalance - lastWalletBalance) > 0.0001) {
           const delta = totalWalletBalance - lastWalletBalance;
-          console.log(`[Sync] Wallet shifted by ${delta.toFixed(4)}. Updating DB balance...`);
+          console.log(`[Sync] Wallet shifted by +${delta.toFixed(4)}. Updating DB balance...`);
           activeBalance += delta;
-          if (activeBalance < 0) activeBalance = 0;
-          updateUserData({ 
-            balance: activeBalance, 
-            last_wallet_balance: totalWalletBalance 
-          });
+          updateUserData({ balance: activeBalance, last_wallet_balance: totalWalletBalance });
+        } else if (!hasError && Math.abs(totalWalletBalance - lastWalletBalance) > 0.0001) {
+          console.log(`[Sync] Wallet shifted by ${ (totalWalletBalance - lastWalletBalance).toFixed(4) }. Updating sync tracker only.`);
+          updateUserData({ last_wallet_balance: totalWalletBalance });
         }
         
         // Update state with the final determined balance
@@ -1327,19 +1326,27 @@ export default function App() {
                       setIsProcessing(true);
                       try {
                         const { data: { session: authSession } } = await supabase.auth.getSession();
+                        const withdrawAmount = Number(Number(balance).toFixed(6));
+                        
+                        console.log('[Withdraw] Initiating:', { userId: userInfo.uuid, amount: withdrawAmount });
+
                         const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
                           method: 'POST',
                           headers: {
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
                           },
-                          body: JSON.stringify({ action: 'WITHDRAW', payload: { userId: userInfo.uuid, amount: balance } })
+                          body: JSON.stringify({ action: 'WITHDRAW', payload: { userId: userInfo.uuid, amount: withdrawAmount } })
                         });
+
                         const result = await res.json();
+                        console.log('[Withdraw] Response:', result);
+
                         if (result.error) throw new Error(result.error);
                         notify(result.payoutSent ? 'Withdrawal initiated successfully!' : 'Withdrawal processed to virtual credits.', 'success');
                         fetchUserData();
                       } catch (err: any) {
+                        console.error('[Withdraw] Error:', err);
                         notify(err.message || 'Withdrawal failed', 'error');
                       } finally {
                         setIsProcessing(false);
@@ -1549,13 +1556,18 @@ export default function App() {
                     <div className="h-px bg-white/5"></div>
                     <div className="flex justify-between text-sm">
                       <div className="flex flex-col">
-                        <span className="text-red-400">Death Penalty (50%)</span>
+                        <span className="text-red-400">Survival Penalty (50%)</span>
                         <span className="text-[10px] text-slate-500 uppercase">Clawback Protocol</span>
                       </div>
                       <span className="text-red-400 font-mono">-${Number(gameOverResult.penalty || 0).toFixed(2)}</span>
                     </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-emerald-400">Survival Payout</span>
+                      <span className="text-emerald-400 font-mono">+${Number((gameOverResult.collected || 0) - (gameOverResult.penalty || 0)).toFixed(2)}</span>
+                    </div>
+                    <div className="h-px bg-white/5"></div>
                     <div className="pt-4 flex justify-between items-baseline">
-                      <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Net Session Profit</span>
+                      <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Total Net Gain</span>
                       <span className={`text-2xl font-black italic ${(gameOverResult.collected - gameOverResult.penalty - 0.10) >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>
                         ${Number((gameOverResult.collected || 0) - (gameOverResult.penalty || 0) - 0.10).toFixed(2)}
                       </span>
