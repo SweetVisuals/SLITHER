@@ -343,7 +343,7 @@ Deno.serve(async (req) => {
       
       const { data: profile, error: profileError } = await supabaseClient
         .from('profiles')
-        .select('balance, wallet_address, last_wallet_balance')
+        .select('balance')
         .eq('id', userId)
         .single();
         
@@ -353,49 +353,25 @@ Deno.serve(async (req) => {
       const buyIn = 0.10;
       const netPnl = Math.max(0, earnings - buyIn);
       
-      // Redistribution Math
+      // Redistribution Math (50% penalty on PROFIT only)
       const penalty = netPnl * 0.50;
       const totalToDrop = netPnl * 0.40;
       const houseRake = netPnl * 0.05;
       const foodPool = netPnl * 0.05;
 
-      const playerPayout = earnings - penalty;
+      // Net Gain for the player (Gross Earnings - Penalty)
+      const netGain = earnings - penalty;
       
-      let currentBalance = Number(profile.balance) || 0;
-      let newBalance = Math.max(0, currentBalance - penalty);
-      let newLastWalletBalance = Number(profile.last_wallet_balance) || 0;
-      
-      let txHash = null;
-      if (playerPayout > 0 && profile.wallet_address) {
-        // Payout Helper (Re-used for EOA)
-        const sendPayout = async (to: string, amount: number) => {
-          try {
-            const relayerKey = Deno.env.get('RELAYER_PRIVATE_KEY');
-            if (!relayerKey) return null;
-            const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
-            const wallet = new ethers.Wallet(relayerKey, provider);
-            const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-            const usdcContract = new ethers.Contract(usdcAddress, ["function transfer(address to, uint256 amount) returns (bool)"], wallet);
-            const tx = await usdcContract.transfer(to, ethers.parseUnits(amount.toFixed(6), 6));
-            return tx.hash;
-          } catch (err) {
-            console.error('[GameEngine] DIE Payout failed:', err.message);
-            return null;
-          }
-        };
-        
-        txHash = await sendPayout(profile.wallet_address, playerPayout);
-        if (txHash) {
-          newBalance = Math.max(0, newBalance - playerPayout);
-          newLastWalletBalance += playerPayout;
-        }
-      }
+      // Update Game Balance: Add the net gain back to the remaining balance
+      const currentBalance = Number(profile.balance) || 0;
+      const newBalance = currentBalance + netGain;
+
+      console.log(`[GameEngine] DIE: Earnings ${earnings}, Penalty ${penalty}, Net Gain ${netGain}, New Balance ${newBalance}`);
 
       await supabaseClient
         .from('profiles')
         .update({ 
-          balance: newBalance,
-          last_wallet_balance: newLastWalletBalance
+          balance: newBalance
         })
         .eq('id', userId);
 
@@ -409,6 +385,7 @@ Deno.serve(async (req) => {
         .eq('user_id', userId)
         .eq('status', 'active');
 
+      // Handle redistribution drops
       if (totalToDrop > 0) {
         const drops = [];
         const dropCount = Math.min(15, Math.max(1, Math.floor(totalToDrop / 0.02))); 
@@ -427,7 +404,13 @@ Deno.serve(async (req) => {
         await supabaseClient.from('drops').insert(drops);
       }
 
-      return new Response(JSON.stringify({ penalty, newBalance, payoutSent: !!txHash, txHash }), {
+      return new Response(JSON.stringify({ 
+        penalty, 
+        netGain,
+        newBalance, 
+        payoutSent: false, // No longer auto-paying on death
+        message: 'Earnings added to game balance'
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
