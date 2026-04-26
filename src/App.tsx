@@ -1758,9 +1758,7 @@ export default function App() {
                     <ExternalLink className="w-5 h-5 text-emerald-500 group-hover:scale-110 transition-transform" />
                   </button>
                 </div>
-              </div>
-            </div>
-          </div>
+
 
               <div className="pt-4">
                 <button 
@@ -1769,6 +1767,7 @@ export default function App() {
                 >
                   Return to Dashboard
                 </button>
+                </div>
               </div>
             </div>
           </div>
