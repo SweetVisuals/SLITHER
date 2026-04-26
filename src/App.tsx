@@ -166,25 +166,20 @@ export default function App() {
         return;
       }
       
-      // Shared balance fetch logic
       const getBalance = async (targetAddr: any) => {
-        if (!targetAddr || typeof targetAddr !== 'string' || targetAddr === 'null') {
+        if (!targetAddr || typeof targetAddr !== 'string' || targetAddr === 'null' || targetAddr === 'undefined') {
           return 0;
         }
 
         // Only process EVM addresses
         if (!targetAddr.startsWith('0x') || targetAddr.length !== 42) {
-          console.log(`[Diagnostic] Skipping non-EVM address: ${targetAddr}`);
           return 0;
         }
         
-        console.log(`[Diagnostic] Checking balance for: ${targetAddr}`);
         const callData = '0x70a08231' + targetAddr.replace('0x', '').padStart(64, '0');
-        const publicRpc = 'https://arb1.arbitrum.io/rpc';
         
         const fetchCall = async (contract: string) => {
           try {
-            // Prioritize authenticated provider to bypass CORS/rate-limits
             if (provider) {
               const res = await (provider as any).request({
                 method: 'eth_call',
@@ -193,7 +188,7 @@ export default function App() {
               return res;
             }
 
-            const response = await fetch(publicRpc, {
+            const response = await fetch('https://arb1.arbitrum.io/rpc', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -204,7 +199,7 @@ export default function App() {
               })
             });
             const result = await response.json();
-            return result.result;
+            return result?.result || null;
           } catch (e) {
             console.error(`[RPC Error] Failed to fetch balance for ${contract}:`, e);
             return null;
@@ -216,10 +211,24 @@ export default function App() {
           fetchCall(USDC_E_ADDRESS)
         ]);
 
-        const valUSDC = resUSDC ? parseInt(resUSDC, 16) / Math.pow(10, USDC_DECIMALS) : 0;
-        const valUSDCe = resUSDCe ? parseInt(resUSDCe, 16) / Math.pow(10, USDC_E_DECIMALS) : 0;
+        console.log(`[Diagnostic] Raw balances for ${targetAddr.slice(0, 8)}...:`, { resUSDC, resUSDCe });
 
-        return valUSDC + valUSDCe;
+        // If both fail, return null to signal a fetch error
+        if (resUSDC === null && resUSDCe === null) return null;
+
+        let total = 0;
+        if (resUSDC && resUSDC !== '0x' && resUSDC.length > 2) {
+          try {
+            total += Number(BigInt(resUSDC)) / Math.pow(10, USDC_DECIMALS);
+          } catch (e) { console.warn('Failed to parse USDC balance:', resUSDC); }
+        }
+        if (resUSDCe && resUSDCe !== '0x' && resUSDCe.length > 2) {
+          try {
+            total += Number(BigInt(resUSDCe)) / Math.pow(10, USDC_DECIMALS);
+          } catch (e) { console.warn('Failed to parse USDC.e balance:', resUSDCe); }
+        }
+
+        return total;
       };
 
       const scanSet = new Set<string>();
@@ -435,7 +444,9 @@ export default function App() {
                     }
                   }
                 });
-                return await sa.getAddress();
+                const address = await sa.getAddress();
+                console.log(`[Diagnostic] Discovered ${type} ${version}:`, address);
+                return address;
               } catch (e) {
                 console.warn(`[Diagnostic] Failed to init ${type} ${version} account:`, e);
                 return '';
@@ -446,14 +457,6 @@ export default function App() {
             const biconomyV1Address = await initSA('BICONOMY', '1.0.0');
             simpleAddress = await initSA('SIMPLE', '1.0.0');
             const simpleV2Address = await initSA('SIMPLE', '2.0.0');
-            
-            // Log for debugging
-            console.log('[Diagnostic] AA Discovery:', { 
-              biconomyV2: biconomyAddress, 
-              biconomyV1: biconomyV1Address,
-              simpleV1: simpleAddress,
-              simpleV2: simpleV2Address
-            });
             
             if (biconomyV1Address) (userInfo as any).biconomyV1Address = biconomyV1Address;
             if (simpleV2Address) (userInfo as any).simpleV2Address = simpleV2Address;
