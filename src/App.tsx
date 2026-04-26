@@ -1196,7 +1196,7 @@ export default function App() {
         )}
 
         {currentPage === 'PLAYING' && (
-          <div className="fixed inset-0 z-[50] bg-slate-950">
+          <div className="fixed inset-0 z-[2000] bg-slate-950 w-screen h-screen">
             <Game 
               onGameOver={handleGameOver}
               onScoreUpdate={setScore}
