@@ -62,35 +62,6 @@ export default function App() {
     ]
   };
 
-  const isAdmin = userInfo?.email === 'ptnmgmt@gmail.com';
-  
-  const handleLogout = async () => {
-    try {
-      setIsProcessing(true);
-      await disconnect();
-      if (logout) await logout();
-      await supabase.auth.signOut();
-      
-      // Reset all user-related state
-      setUserAddress('');
-      setBalance(0);
-      setHighScore(0);
-      setTotalInjected(0);
-      setTotalSessions(0);
-      setUserProfile(null);
-      setTreasuryBalance(0);
-      setEmailInput('');
-      setCurrentPage('HOME');
-      
-      notify('Session terminated successfully', 'success');
-    } catch (err) {
-      console.error('Logout error:', err);
-      notify('Failed to clear session fully', 'error');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const [currentPage, setCurrentPage] = useState<Page>('HOME');
   const [selectedGame, setSelectedGame] = useState<'SLITHER'>('SLITHER');
   const [score, setScore] = useState(0);
@@ -131,6 +102,287 @@ export default function App() {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 5000);
   };
+
+  const isAdmin = userInfo?.email === 'ptnmgmt@gmail.com';
+  
+  const handleLogout = async () => {
+    try {
+      setIsProcessing(true);
+      await disconnect();
+      if (logout) await logout();
+      await supabase.auth.signOut();
+      
+      // Reset all user-related state
+      setUserAddress('');
+      setBalance(0);
+      setHighScore(0);
+      setTotalInjected(0);
+      setTotalSessions(0);
+      setUserProfile(null);
+      setTreasuryBalance(0);
+      setEmailInput('');
+      setCurrentPage('HOME');
+      
+      notify('Session terminated successfully', 'success');
+    } catch (err) {
+      console.error('Logout error:', err);
+      notify('Failed to clear session fully', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const [treasuryBalance, setTreasuryBalance] = useState<number>(0);
+
+  const updateUserData = async (updates: any) => {
+    if (!userInfo?.uuid) return;
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', userInfo.uuid);
+      if (error) throw error;
+    } catch (err) {
+      console.error('Supabase update error:', err);
+    }
+  };
+
+  const fetchUserData = useCallback(async (forcedAddressInput?: string | any, retryCount = 0, aaExtras?: { biconomyAddress?: string, simpleAddress?: string }) => {
+    if (!userInfo?.uuid) return;
+    
+    // Ensure forcedAddress is a string (prevents event objects from leaking in)
+    const forcedAddress = typeof forcedAddressInput === 'string' ? forcedAddressInput : undefined;
+    
+    try {
+      setIsProcessing(true);
+      
+      // Only retry if an EVM wallet is null (Solana is often null if not used)
+      const hasNullEVMWallet = userInfo.wallets?.some((w: any) => 
+        (w.chain_name?.toLowerCase().includes('evm') || !w.chain_name) && !w.public_address
+      );
+      if (hasNullEVMWallet && retryCount < 5) {
+        console.log(`[Diagnostic] Null EVM wallet address detected. Retrying fetch in 1.5s... (${retryCount + 1}/5)`);
+        setTimeout(() => fetchUserData(forcedAddress, retryCount + 1), 1500);
+        return;
+      }
+      
+      // Shared balance fetch logic
+      const getBalance = async (targetAddr: any) => {
+        if (!targetAddr || typeof targetAddr !== 'string' || targetAddr === 'null') {
+          return 0;
+        }
+
+        // Only process EVM addresses
+        if (!targetAddr.startsWith('0x') || targetAddr.length !== 42) {
+          console.log(`[Diagnostic] Skipping non-EVM address: ${targetAddr}`);
+          return 0;
+        }
+        
+        console.log(`[Diagnostic] Checking balance for: ${targetAddr}`);
+        const callData = '0x70a08231' + targetAddr.replace('0x', '').padStart(64, '0');
+        const publicRpc = 'https://arb1.arbitrum.io/rpc';
+        
+        const fetchCall = async (contract: string) => {
+          try {
+            // Prioritize authenticated provider to bypass CORS/rate-limits
+            if (provider) {
+              const res = await (provider as any).request({
+                method: 'eth_call',
+                params: [{ to: contract, data: callData }, 'latest']
+              });
+              return res;
+            }
+
+            const response = await fetch(publicRpc, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'eth_call',
+                params: [{ to: contract, data: callData }, 'latest']
+              })
+            });
+            const result = await response.json();
+            return result.result;
+          } catch (e) {
+            console.error(`[RPC Error] Failed to fetch balance for ${contract}:`, e);
+            return null;
+          }
+        };
+
+        const [resUSDC, resUSDCe] = await Promise.all([
+          fetchCall(USDC_ADDRESS),
+          fetchCall(USDC_E_ADDRESS)
+        ]);
+
+        const valUSDC = resUSDC ? parseInt(resUSDC, 16) / Math.pow(10, USDC_DECIMALS) : 0;
+        const valUSDCe = resUSDCe ? parseInt(resUSDCe, 16) / Math.pow(10, USDC_E_DECIMALS) : 0;
+
+        return valUSDC + valUSDCe;
+      };
+
+      const scanSet = new Set<string>();
+      if (forcedAddress) scanSet.add(forcedAddress);
+      if (userAddress) scanSet.add(userAddress);
+      if (ethAddress) scanSet.add(ethAddress);
+      if (aaExtras?.biconomyAddress) scanSet.add(aaExtras.biconomyAddress);
+      if (aaExtras?.simpleAddress) scanSet.add(aaExtras.simpleAddress);
+
+      // Add all wallets from Particle
+      const pWallets = userInfo.wallets || [];
+      pWallets.forEach((w: any) => {
+        if (w.public_address && w.public_address !== 'null') scanSet.add(w.public_address);
+      });
+
+      // Check provider accounts directly as a fallback
+      if (provider) {
+        try {
+          const pAccounts = await (provider as any).request({ method: 'eth_accounts' });
+          if (pAccounts && Array.isArray(pAccounts)) {
+            pAccounts.forEach((a: string) => {
+              if (a && typeof a === 'string' && a !== 'null') scanSet.add(a);
+            });
+          }
+          
+          // Try to specifically request the smart account via Particle-specific RPC
+          try {
+            const aaAccount = await (provider as any).request({ method: 'particle_aa_getSmartAccount' });
+            if (aaAccount && typeof aaAccount === 'string') scanSet.add(aaAccount);
+            if (Array.isArray(aaAccount)) aaAccount.forEach((a: any) => {
+              if (a?.smartAccountAddress) scanSet.add(a.smartAccountAddress);
+            });
+          } catch (aaErr) {
+            // This might fail if the method isn't supported, which is fine
+          }
+        } catch (e) {
+          console.warn('[Diagnostic] Failed to fetch provider accounts:', e);
+        }
+      }
+
+      console.log(`[Diagnostic] Aggregating assets for ${scanSet.size} addresses:`, Array.from(scanSet));
+      
+      let totalWalletBalance = 0;
+      let hasError = false;
+      const newDetected: {addr: string, bal: number, type: string}[] = [];
+      
+      for (const addr of scanSet) {
+        if (!addr || typeof addr !== 'string' || addr.length < 20 || addr === 'null') continue;
+        const bal = await getBalance(addr);
+        if (bal === null) {
+          hasError = true;
+          continue;
+        }
+        console.log(`[Diagnostic] Balance for ${addr}: ${bal}`);
+        totalWalletBalance += bal;
+        
+        // Determine type for diagnostic display
+        let type = 'EOA/External';
+        if (aaExtras?.biconomyAddress && addr === aaExtras.biconomyAddress) type = 'Biconomy V2';
+        else if (addr === (userInfo as any).biconomyV1Address) type = 'Biconomy V1';
+        else if (aaExtras?.simpleAddress && addr === aaExtras.simpleAddress) type = 'Simple AA V1';
+        else if (addr === (userInfo as any).simpleV2Address) type = 'Simple AA V2';
+        else if (userInfo.wallets?.some((w: any) => w.public_address === addr)) type = 'Linked Particle';
+        
+        newDetected.push({ addr, bal, type });
+      }
+      setDetectedAddresses(newDetected);
+
+      console.log(`[Diagnostic] Total Aggregate Wallet Balance: ${totalWalletBalance}`);
+      
+      // Update local address if not set
+      const primaryAddr = forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
+      if (primaryAddr && !userAddress) setUserAddress(primaryAddr);
+
+      // Fetch treasury balance if admin (check email OR wallet)
+      const currentAddress = primaryAddr;
+      if (userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || currentAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') {
+        const tBal = await getBalance(PRIMARY_WALLET);
+        if (tBal !== null) setTreasuryBalance(tBal);
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userInfo.uuid)
+        .single();
+
+      if (data) {
+        let activeBalance = Number(data.balance) || 0;
+        const lastWalletBalance = Number(data.last_wallet_balance) || 0;
+        
+        // ADDITIVE SYNC LOGIC:
+        // Instead of overwriting, we calculate the delta of the wallet since last check.
+        // This preserves in-game virtual credits (collections/buy-ins) while picking up
+        // external deposits or withdrawals.
+        if (!hasError && Math.abs(totalWalletBalance - lastWalletBalance) > 0.0001) {
+          const delta = totalWalletBalance - lastWalletBalance;
+          console.log(`[Sync] Wallet shifted by ${delta.toFixed(4)}. Updating DB balance...`);
+          activeBalance += delta;
+          if (activeBalance < 0) activeBalance = 0;
+          updateUserData({ 
+            balance: activeBalance, 
+            last_wallet_balance: totalWalletBalance 
+          });
+        }
+        
+        // Update state with the final determined balance
+        setBalance(activeBalance);
+        setHighScore(data.high_score);
+        setTotalInjected(data.total_injected);
+        setTotalSessions(data.total_sessions);
+        setUserProfile(data);
+        
+        // If profile doesn't have name/email, update it
+        if (!data.email || !data.name || !data.wallet_address) {
+          const fallbackName = userInfo.name || (userInfo.email ? userInfo.email.split('@')[0] : 'Operator ' + userInfo.uuid.slice(0, 4));
+          updateUserData({ 
+            email: userInfo.email || data.email,
+            name: data.name || fallbackName,
+            wallet_address: primaryAddr || data.wallet_address,
+            last_wallet_balance: totalWalletBalance // Also sync this here
+          });
+          // Update local state immediately
+          setUserProfile({ 
+            ...data, 
+            name: data.name || fallbackName, 
+            email: data.email || userInfo.email,
+            wallet_address: primaryAddr || data.wallet_address
+          });
+        }
+      } else if (error && error.code === 'PGRST116') {
+        const initialBalance = totalWalletBalance;
+        const { data: newData, error: insertError } = await supabase
+          .from('profiles')
+          .insert([{ 
+            id: userInfo.uuid, 
+            email: userInfo.email,
+            name: userInfo.name || 'Operator ' + userInfo.uuid.slice(0, 4),
+            balance: initialBalance,
+            last_wallet_balance: initialBalance,
+            high_score: 0,
+            total_injected: 0,
+            total_sessions: 0,
+            wallet_address: primaryAddr
+          }])
+          .select()
+          .single();
+        
+        if (newData) {
+          setBalance(newData.balance);
+          setHighScore(newData.high_score);
+          setTotalInjected(newData.total_injected);
+          setTotalSessions(newData.total_sessions);
+          setUserProfile(newData);
+        }
+        if (insertError) console.error('Error creating profile:', insertError);
+      }
+    } catch (err) {
+      console.error('Fetch user data error:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [userInfo?.uuid, userAddress, provider, ethAddress]);
 
   // Sync with Supabase on auth change
   useEffect(() => {
@@ -286,9 +538,6 @@ export default function App() {
 
     discoverAddresses();
   }, [connectionStatus, userInfo?.uuid, provider, ethAddress]);
-
-  // Add state for treasury balance
-  const [treasuryBalance, setTreasuryBalance] = useState<number>(0);
 
   const fetchUserData = useCallback(async (forcedAddressInput?: string | any, retryCount = 0, aaExtras?: { biconomyAddress?: string, simpleAddress?: string }) => {
     if (!userInfo?.uuid) return;
@@ -565,18 +814,6 @@ export default function App() {
     }
   };
 
-  const updateUserData = async (updates: any) => {
-    if (!userInfo?.uuid) return;
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update(updates)
-        .eq('id', userInfo.uuid);
-      if (error) throw error;
-    } catch (err) {
-      console.error('Supabase update error:', err);
-    }
-  };
 
   const startGame = async () => {
     if (selectedGame === 'SLITHER') {
