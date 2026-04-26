@@ -713,24 +713,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
          ctx.fillText(`${Math.floor(s.score)}`, width - 10 - margin, leaderboardY + 38 + idx * 20);
       });
 
-      // DEBUG OVERLAY (Only visible if something is wrong or for diagnostics)
-      if (frameCount < 100 || lastError) {
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(10, 10, 250, 100);
-        ctx.fillStyle = '#38BDF8';
-        ctx.font = '10px monospace';
-        ctx.fillText(`ENGINE: ACTIVE | FRAMES: ${frameCount}`, 20, 30);
-        ctx.fillText(`PLAYER: ${player.id} | SCORE: ${Math.floor(player.score)}`, 20, 45);
-        ctx.fillText(`POS: ${Math.floor(player.segments[0].x)}, ${Math.floor(player.segments[0].y)}`, 20, 60);
-        ctx.fillText(`FOOD: ${foods.length} | BOTS: ${bots.length}`, 20, 75);
-        if (lastError) {
-          ctx.fillStyle = '#F87171';
-          ctx.fillText(`ERROR: ${lastError}`, 20, 90);
-        }
-        ctx.restore();
-      }
+
 
       if (isRunning) animationId = requestAnimationFrame(loop);
     } catch (err: any) {

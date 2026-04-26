@@ -828,7 +828,7 @@ export default function App() {
     );
   }
 
-  console.log('[Render] App state:', { currentPage, userAddress, hasProfile: !!userProfile });
+
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-sky-500/30 overflow-x-hidden">
