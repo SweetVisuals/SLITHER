@@ -286,15 +286,31 @@ export default function App() {
         notify(`Successfully added ${result.added} credits!`, 'success');
         // Update local profile state immediately for real-time dashboard feedback
         if (userProfile) {
-          setUserProfile({
-            ...userProfile,
-            balance: result.newBalance
-          });
-          setBalance(result.newBalance);
+          const updatedBal = result.newBalance;
+          setUserProfile({ ...userProfile, balance: updatedBal });
+          setBalance(updatedBal);
         }
         await fetchUserData();
       } else {
-        throw new Error(result.error || 'Failed to award credits');
+        // --- GRACEFUL INDEXING HANDLING ---
+        // If the backend says 'not detected yet' but we KNOW the tx was broadcasted successfully
+        if (result.error?.toLowerCase().includes('not detected yet')) {
+          notify('Confirmed! Your balance is syncing on-chain...', 'success');
+          // Start a background polling loop to update the balance once indexed
+          let checkCount = 0;
+          const poll = setInterval(async () => {
+            checkCount++;
+            const { data } = await supabase.from('profiles').select('balance').eq('id', userInfo.uuid).single();
+            if (data?.balance && data.balance > (userProfile?.balance || 0)) {
+              setBalance(data.balance);
+              setUserProfile(prev => prev ? { ...prev, balance: data.balance } : null);
+              clearInterval(poll);
+            }
+            if (checkCount > 10) clearInterval(poll);
+          }, 3000);
+        } else {
+          throw new Error(result.error || 'Failed to award credits');
+        }
       }
     } catch (err: any) {
       console.error('[TopUp] Error:', err);

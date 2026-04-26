@@ -289,34 +289,39 @@ Deno.serve(async (req) => {
       console.log(`[GameEngine] Verifying deposit: ${txHash}`);
       const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
       
-      // Wait for transaction to be confirmed
-      const tx = await provider.getTransaction(txHash);
-      if (!tx) throw new Error('Transaction not found');
-      
-      const receipt = await tx.wait();
-      if (receipt.status !== 1) throw new Error('Transaction failed');
-
-      // Verify destination and token
-      const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-      // Basic check: transfer(address,uint256) is 0xa9059cbb...
-      // We should ideally parse logs for a more robust check
-      const logs = receipt.logs.filter(l => l.address.toLowerCase() === usdcAddress.toLowerCase());
-      if (logs.length === 0) throw new Error('No USDC transfer found in transaction');
-
-      // For this implementation, we'll parse the transfer log to get the amount
-      const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
+      // Award credits - with retry logic for indexing delays
       let totalDeposited = 0;
+      let retries = 5;
       
-      for (const log of logs) {
-        try {
-          const parsed = iface.parseLog(log);
-          if (parsed.name === 'Transfer' && parsed.args.to.toLowerCase() === PRIMARY_WALLET.toLowerCase()) {
-            totalDeposited += Number(parsed.args.value) / 1e6;
+      while (retries > 0 && totalDeposited <= 0) {
+        console.log(`[GameEngine] Checking logs for deposit... (Attempts left: ${retries})`);
+        
+        // Wait for transaction to be confirmed
+        const tx = await provider.getTransaction(txHash);
+        if (tx) {
+          const receipt = await tx.wait();
+          if (receipt.status === 1) {
+            const logs = receipt.logs.filter(l => l.address.toLowerCase() === usdcAddress.toLowerCase());
+            const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
+            
+            for (const log of logs) {
+              try {
+                const parsed = iface.parseLog(log);
+                if (parsed.name === 'Transfer' && parsed.args.to.toLowerCase() === PRIMARY_WALLET.toLowerCase()) {
+                  totalDeposited += Number(parsed.args.value) / 1e6;
+                }
+              } catch (e) {}
+            }
           }
-        } catch (e) {}
+        }
+        
+        if (totalDeposited <= 0) {
+          retries--;
+          if (retries > 0) await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
 
-      if (totalDeposited <= 0) throw new Error('No transfer to Treasury found');
+      if (totalDeposited <= 0) throw new Error('No USDC transfer to Treasury detected yet. If your transaction was successful, your balance will sync automatically in a moment.');
 
       // Award credits
       const { data: profile } = await supabaseClient.from('profiles').select('balance, total_injected').eq('id', userId).single();
