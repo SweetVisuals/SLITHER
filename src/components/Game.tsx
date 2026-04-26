@@ -329,7 +329,7 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authSession?.access_token || ''}`
+            'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
           },
           body: JSON.stringify({
             action: 'DIE',

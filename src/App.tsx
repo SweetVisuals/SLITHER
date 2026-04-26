@@ -43,7 +43,7 @@ type Page = 'HOME' | 'PLAYING' | 'PROFILE';
 
 export default function App() {
   const { connect, disconnect, connectionStatus, userInfo: connectUserInfo } = useConnect();
-  const { openWallet, provider: authProvider, userInfo: authUserInfo, logout } = useAuthCore();
+  const { provider: authProvider, userInfo: authUserInfo, logout } = useAuthCore();
   const { provider: ethProvider, address: ethAddress } = useEthereum();
   
   const provider = authProvider || ethProvider;
@@ -289,7 +289,7 @@ export default function App() {
                 method: 'eth_call',
                 params: [{ to: contract, data: callData }, 'latest']
               });
-              return res || '0x';
+              return res;
             }
 
             const response = await fetch(publicRpc, {
@@ -304,23 +304,25 @@ export default function App() {
             });
             if (!response.ok) {
               console.warn(`[BalanceCheck] RPC error ${response.status} for ${contract}`);
-              return '0x';
+              return null;
             }
             const res = await response.json();
             if (res.error) {
               console.warn(`[BalanceCheck] RPC returned error for ${contract}:`, res.error);
-              return '0x';
+              return null;
             }
-            return res.result || '0x';
+            return res.result;
           } catch (e) {
             console.error(`[BalanceCheck] Request failed for ${contract}:`, e);
-            return '0x';
+            return null;
           }
         };
 
         const hexNative = await fetchCall(USDC_ADDRESS);
         const hexBridged = await fetchCall(USDC_E_ADDRESS);
         
+        if (hexNative === null || hexBridged === null) return null;
+
         let total = 0;
         if (hexNative && hexNative !== '0x' && hexNative.length > 10) {
           total += Number(BigInt(hexNative)) / 10 ** USDC_DECIMALS;
@@ -381,11 +383,16 @@ export default function App() {
       console.log(`[Diagnostic] Aggregating assets for ${scanSet.size} addresses:`, Array.from(scanSet));
       
       let totalWalletBalance = 0;
+      let hasError = false;
       const newDetected: {addr: string, bal: number, type: string}[] = [];
       
       for (const addr of scanSet) {
         if (!addr || typeof addr !== 'string' || addr.length < 20 || addr === 'null') continue;
         const bal = await getBalance(addr);
+        if (bal === null) {
+          hasError = true;
+          continue;
+        }
         console.log(`[Diagnostic] Balance for ${addr}: ${bal}`);
         totalWalletBalance += bal;
         
@@ -411,7 +418,7 @@ export default function App() {
       const currentAddress = primaryAddr;
       if (userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || currentAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') {
         const tBal = await getBalance(PRIMARY_WALLET);
-        setTreasuryBalance(tBal);
+        if (tBal !== null) setTreasuryBalance(tBal);
       }
 
       const { data, error } = await supabase
@@ -428,10 +435,11 @@ export default function App() {
         // Instead of overwriting, we calculate the delta of the wallet since last check.
         // This preserves in-game virtual credits (collections/buy-ins) while picking up
         // external deposits or withdrawals.
-        if (totalWalletBalance > 0 && Math.abs(totalWalletBalance - lastWalletBalance) > 0.0001) {
+        if (!hasError && Math.abs(totalWalletBalance - lastWalletBalance) > 0.0001) {
           const delta = totalWalletBalance - lastWalletBalance;
           console.log(`[Sync] Wallet shifted by ${delta.toFixed(4)}. Updating DB balance...`);
           activeBalance += delta;
+          if (activeBalance < 0) activeBalance = 0;
           updateUserData({ 
             balance: activeBalance, 
             last_wallet_balance: totalWalletBalance 
@@ -546,7 +554,7 @@ export default function App() {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authSession?.access_token || ''}`
+              'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
             },
             body: JSON.stringify({ 
               action: 'START_SESSION', 
@@ -681,7 +689,7 @@ export default function App() {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authSession?.access_token || ''}`
+              'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
             },
             body: JSON.stringify({ 
               action: 'COLLECT', 
@@ -711,7 +719,7 @@ export default function App() {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${authSession?.access_token || ''}`
+                  'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
                 },
                 body: JSON.stringify({ 
                   action: 'COLLECT', 
@@ -1205,7 +1213,7 @@ export default function App() {
                   </div>
 
                   <button 
-                    onClick={() => openWallet()}
+                    onClick={() => window.open('https://wallet.particle.network', '_blank')}
                     className="p-6 bg-slate-800/30 hover:bg-slate-800/50 rounded-2xl flex items-center justify-between group transition-all"
                   >
                     <div className="text-left">
