@@ -1577,108 +1577,92 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="space-y-6">
-                <div className="p-8 bg-slate-950/50 rounded-3xl space-y-6">
-                  {/* Balance Stats */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
-                    <div style={{ padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '15px' }}>
-                      <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px', marginBottom: '5px' }}>BALANCE</div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#00ffa3' }}>
-                        ${(userProfile?.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div style={{ padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '15px' }}>
-                      <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px', marginBottom: '5px' }}>TOTAL INJECTED</div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
-                        ${(userProfile?.total_injected || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
+              <div className="space-y-8">
+                {/* Balance Stats */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-6 bg-white/[0.03] rounded-3xl space-y-2">
+                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest font-bold">Balance</p>
+                    <p className="text-2xl font-black text-[#00ffa3] italic tracking-tighter">
+                      ${(userProfile?.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="p-6 bg-white/[0.03] rounded-3xl space-y-2">
+                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest font-bold">Total Injected</p>
+                    <p className="text-2xl font-black text-white italic tracking-tighter">
+                      ${(userProfile?.total_injected || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Top Up Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between px-2">
+                    <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <Zap className="w-3 h-3 text-sky-400" />
+                      Top Up Balance
+                    </h4>
                   </div>
 
-                  {/* Advanced Diagnostics Section - Moved to Popup for Privacy */}
-                  <div className="space-y-4 relative z-10 pt-4">
-                    <div className="flex items-center gap-3 px-2">
-                      <ShieldAlert className="w-4 h-4 text-slate-500" />
-                      <h4 className="text-slate-500 font-mono text-[10px] uppercase font-black tracking-widest">Active Wallet Nodes</h4>
-                    </div>
-                    <div className="bg-slate-950/40 rounded-3xl overflow-x-auto no-scrollbar">
-                      <table className="w-full text-left border-collapse min-w-[400px]">
-                        <thead>
-                          <tr className="bg-slate-950/60">
-                            <th className="p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Node</th>
-                            <th className="p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Liquidity</th>
-                            <th className="p-4 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/30">
-                          {detectedAddresses.filter(d => {
-                            // Only show wallets with balance, OR keep Treasury for visibility
-                            if (d.type === 'House Treasury') return true;
-                            // Hide Smart Accounts (Biconomy/Simple) if they are empty
-                            const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
-                            if (isSmart && d.bal <= 0) return false;
-                            // Show everything else
-                            return true;
-                          }).length > 0 ? detectedAddresses.filter(d => {
-                            if (d.type === 'House Treasury') return true;
-                            const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
-                            if (isSmart && d.bal <= 0) return false;
-                            return true;
-                          }).map((d, i) => (
-                            <tr key={i} className="hover:bg-sky-500/5 transition-colors group/row">
-                              <td className="p-4">
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[10px] font-black text-sky-400 uppercase tracking-tighter">{d.type}</span>
-                                  <span className="text-[8px] font-mono text-slate-500 opacity-60">{d.addr.slice(0, 8)}...{d.addr.slice(-6)}</span>
-                                </div>
-                              </td>
-                              <td className="p-4 text-right">
-                                <span className="text-xs font-black text-white italic">${d.bal.toFixed(2)}</span>
-                              </td>
-                              <td className="p-4 text-right">
-                                {d.bal > 0 && d.type !== 'House Treasury' && (
-                                  <button 
-                                    onClick={() => {
-                                       (window as any)._targetDepositAddr = d.addr;
-                                       (window as any)._targetDepositType = d.type;
-                                       if (!topUpAmount || Number(topUpAmount) <= 0) {
-                                          setTopUpAmount(d.bal.toString());
-                                       }
-                                       setTimeout(() => handleTopUp(), 0);
-                                    }}
-                                    className="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-lg text-[9px] font-black uppercase tracking-tighter transition-all"
-                                  >
-                                    TOP UP
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          )) : (
-                            <tr>
-                              <td colSpan={3} className="p-6 text-center text-slate-600 text-[10px] uppercase font-black tracking-widest italic">
-                                No active nodes found.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                  <div className="space-y-3">
+                    {detectedAddresses.filter(d => {
+                      if (d.type === 'House Treasury') return false;
+                      const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
+                      if (isSmart && d.bal <= 0) return false;
+                      return true;
+                    }).length > 0 ? detectedAddresses.filter(d => {
+                      if (d.type === 'House Treasury') return false;
+                      const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
+                      if (isSmart && d.bal <= 0) return false;
+                      return true;
+                    }).map((d, i) => (
+                      <div key={i} className="premium-glass p-4 rounded-2xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/[0.05] transition-all group/row">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-slate-800/50 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
+                            <Wallet className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-black text-white group-hover/row:text-sky-400 transition-colors uppercase tracking-tight truncate">{d.type}</p>
+                            <p className="text-[10px] font-mono text-slate-500 truncate max-w-[180px] sm:max-w-none">{d.addr}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between sm:justify-end gap-6 border-t border-white/5 sm:border-none pt-3 sm:pt-0">
+                          <div className="text-right">
+                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Available</p>
+                            <p className="text-lg font-black text-white italic tracking-tighter leading-none">${d.bal.toFixed(2)}</p>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              setTimeout(() => handleTopUp(d.bal, d.type, d.addr), 100);
+                            }}
+                            className="px-6 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-sky-500/10 transition-all active:scale-95 whitespace-nowrap"
+                          >
+                            Top Up
+                          </button>
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="text-center py-10 premium-glass rounded-2xl border-none">
+                        <p className="text-slate-500 text-xs font-black uppercase tracking-widest italic">No compatible wallets found with USDC</p>
+                      </div>
+                    )}
                   </div>
+                </div>
 
-
-                  <div className="grid grid-cols-1 gap-4">
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-6 bg-slate-800/30 rounded-2xl space-y-3 border-none">
-                      <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest">Operator Address</p>
-                      <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold text-white font-mono truncate max-w-[120px]">
-                        {userAddress || '0x...'}
+                {/* Account Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-6 bg-white/[0.03] rounded-2xl space-y-3 border-none">
+                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest font-bold">Operator Node</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-bold text-white font-mono truncate">
+                        {userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'Disconnected'}
                       </span>
                       <button 
                         onClick={() => {
-                          navigator.clipboard.writeText(userAddress);
-                          notify('Address copied to clipboard', 'success');
+                          if (userAddress) {
+                            navigator.clipboard.writeText(userAddress);
+                            notify('Address copied!', 'success');
+                          }
                         }}
                         className="p-2 hover:bg-sky-500/10 text-sky-400 rounded-lg transition-all"
                       >
