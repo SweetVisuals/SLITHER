@@ -848,6 +848,8 @@ export default function App() {
     );
   }
 
+  console.log('[Render] App state:', { currentPage, userAddress, hasProfile: !!userProfile });
+
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-sky-500/30 overflow-x-hidden">
       {/* Background Ambience */}
@@ -1195,8 +1197,17 @@ export default function App() {
           </div>
         )}
 
+      </main>
+
+      {/* Game Layer - Outside Main to avoid clipping */}
+      <AnimatePresence>
         {currentPage === 'PLAYING' && (
-          <div className="fixed inset-0 z-[2000] bg-slate-950 w-screen h-screen">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[2000] bg-slate-950 w-screen h-screen overflow-hidden"
+          >
             <Game 
               onGameOver={handleGameOver}
               onScoreUpdate={setScore}
@@ -1204,9 +1215,9 @@ export default function App() {
               userProfile={userProfile}
               isTestMode={isTestMode}
             />
-          </div>
+          </motion.div>
         )}
-      </main>
+      </AnimatePresence>
       {/* Custom Wallet Modal */}
       {isWalletOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center md:p-6 lg:p-12 animate-in fade-in duration-500">
