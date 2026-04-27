@@ -317,21 +317,23 @@ export default function Game({ onGameOver, onScoreUpdate, onMoneyCollect, userPr
       if (snake.dead) return;
       snake.dead = true;
       
-      // Economic Calculation based on user request
-      // Total Drop Value = (Base Drop: $0.50) + (50% of the dead snake's collectedMoney)
-      const totalWealth = 0.50 + (snake.collectedMoney * 0.5);
-      // Applying 5% House Rake
-      const lootToDrop = totalWealth * 0.95;
+      // Economic Calculation for local visual feedback
+      // For BOTS: They drop local "simulated" money so the world feels alive.
+      // For PLAYERS: Real money drops are now handled by the backend/database
+      // to ensure all players see them and they are persisted.
       
-      // Distribute loot across segments as Gold Orbs
+      const isBot = snake.id.startsWith('bot-');
+      const lootToDrop = isBot ? (snake.worth || 0) * 0.95 : 0; // Only drop local money for bots
+      
+      // Distribute loot across segments
       const segmentsToDrop = snake.segments.filter((_, i) => i % 2 === 0);
       const moneyPerOrb = lootToDrop / Math.max(1, segmentsToDrop.length);
 
       segmentsToDrop.forEach((seg) => {
-        // Use rainbow colors for death drops as well to unify the look
         const rainbowColors = ['#38BDF8', '#818CF8', '#C084FC', '#F472B6', '#FB7185', '#FBBF24', '#34D399'];
         const randomRainbow = rainbowColors[Math.floor(Math.random() * rainbowColors.length)];
-        spawnFood(seg.x, seg.y, 3, moneyPerOrb, randomRainbow);
+        // Local player drops have 0 moneyValue locally because the backend inserts real drops into the DB
+        spawnFood(seg.x, seg.y, 3, snake.isPlayer ? 0 : moneyPerOrb, randomRainbow);
       });
 
       if (snake.isPlayer) {
