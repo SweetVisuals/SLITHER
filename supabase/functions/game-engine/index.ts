@@ -306,14 +306,32 @@ Deno.serve(async (req) => {
       const { txHash } = payload;
       if (!txHash) throw new Error('No transaction hash provided');
 
-      console.log(`[GameEngine] Verifying deposit: ${txHash}`);
+      console.log(`[GameEngine] Verifying deposit: ${txHash} for user ${userId}`);
       const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
       
       let totalDeposited = 0;
-      const tx = await provider.getTransaction(txHash);
+      let tx = null;
+      let retries = 10;
+      
+      // Retry loop for getTransaction - useful for both slow RPCs and UserOps that just got bundled
+      while (retries > 0 && !tx) {
+        try {
+          tx = await provider.getTransaction(txHash);
+          if (!tx) {
+            console.log(`[GameEngine] Transaction ${txHash} not found yet. Retrying... (${retries} left)`);
+            retries--;
+            if (retries > 0) await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+        } catch (e) {
+          console.warn(`[GameEngine] Error fetching tx ${txHash}:`, e.message);
+          retries--;
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+      }
+
       if (tx) {
         const receipt = await tx.wait();
-        if (receipt.status === 1) {
+        if (receipt && receipt.status === 1) {
           const logs = receipt.logs.filter(l => 
             l.address.toLowerCase() === USDC_ADDRESS.toLowerCase() || 
             l.address.toLowerCase() === USDC_E_ADDRESS.toLowerCase()
@@ -323,15 +341,22 @@ Deno.serve(async (req) => {
           for (const log of logs) {
             try {
               const parsed = iface.parseLog(log);
-              if (parsed.name === 'Transfer' && parsed.args.to.toLowerCase() === PRIMARY_WALLET.toLowerCase()) {
-                totalDeposited += Number(parsed.args.value) / 1e6;
+              if (parsed && parsed.name === 'Transfer' && parsed.args.to.toLowerCase() === PRIMARY_WALLET.toLowerCase()) {
+                const val = Number(parsed.args.value) / 1e6;
+                console.log(`[GameEngine] Found Transfer of ${val} USDC to Treasury`);
+                totalDeposited += val;
               }
             } catch (e) {}
           }
+        } else {
+          console.error(`[GameEngine] Transaction failed or status not 1: ${txHash}`);
         }
       }
 
-      if (totalDeposited <= 0) throw new Error('not detected yet');
+      if (totalDeposited <= 0) {
+        console.warn(`[GameEngine] Deposit verification failed for ${txHash}. Total detected: ${totalDeposited}`);
+        throw new Error('not detected yet');
+      }
 
       // Award credits
       const { data: profile } = await supabaseClient.from('profiles').select('balance, total_injected').eq('id', userId).single();

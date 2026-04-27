@@ -210,10 +210,25 @@ export default function App() {
             let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
             finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
             
-            txHash = await saInstance.sendTransaction({
+            const userOpHash = await saInstance.sendTransaction({
               tx: finalTx,
               feeQuote: feeQuotes.verifyingPaymasterGasless.feeQuote,
             } as any);
+            
+            notify('Bundling transaction...', 'info');
+            let receipt = null;
+            while (!receipt) {
+              try {
+                receipt = await (provider as any).request({ method: 'eth_getUserOperationReceipt', params: [userOpHash] });
+                if (receipt?.transactionHash) {
+                  txHash = receipt.transactionHash;
+                } else {
+                  await new Promise(r => setTimeout(r, 2000));
+                }
+              } catch (e) {
+                await new Promise(r => setTimeout(r, 2000));
+              }
+            }
           } else if (feeQuotes.tokenPaymaster?.feeQuotes?.length) {
             const quotes = feeQuotes.tokenPaymaster.feeQuotes;
             const balanceChecks = await Promise.all(quotes.map(async (q: any) => {
@@ -245,15 +260,45 @@ export default function App() {
 
             finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
             notify(`Paying gas with ${selectedQuote.tokenInfo.symbol}...`, 'info');
-            txHash = await saInstance.sendTransaction({
+            const userOpHash = await saInstance.sendTransaction({
               tx: finalTx,
               feeQuote: selectedQuote,
               tokenPaymasterAddress: feeQuotes.tokenPaymaster.tokenPaymasterAddress,
             } as any);
+
+            notify('Bundling transaction...', 'info');
+            let receipt = null;
+            while (!receipt) {
+              try {
+                receipt = await (provider as any).request({ method: 'eth_getUserOperationReceipt', params: [userOpHash] });
+                if (receipt?.transactionHash) {
+                  txHash = receipt.transactionHash;
+                } else {
+                  await new Promise(r => setTimeout(r, 2000));
+                }
+              } catch (e) {
+                await new Promise(r => setTimeout(r, 2000));
+              }
+            }
           } else {
             let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
             finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
-            txHash = await saInstance.sendTransaction({ tx: finalTx } as any);
+            const userOpHash = await saInstance.sendTransaction({ tx: finalTx } as any);
+            
+            notify('Bundling transaction...', 'info');
+            let receipt = null;
+            while (!receipt) {
+              try {
+                receipt = await (provider as any).request({ method: 'eth_getUserOperationReceipt', params: [userOpHash] });
+                if (receipt?.transactionHash) {
+                  txHash = receipt.transactionHash;
+                } else {
+                  await new Promise(r => setTimeout(r, 2000));
+                }
+              } catch (e) {
+                await new Promise(r => setTimeout(r, 2000));
+              }
+            }
           }
         } else {
         const browserProvider = new ethers.BrowserProvider(provider as any);
