@@ -89,6 +89,8 @@ export default function App() {
   const [topUpAmount, setTopUpAmount] = useState('');
   const [totalWalletBalance, setTotalWalletBalance] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [syncingTxHash, setSyncingTxHash] = useState<string | null>(null);
+  const [bestWallet, setBestWallet] = useState<{addr: string, bal: number, type: string, token: string} | null>(null);
   const smartAccountRef = useRef<SmartAccount | null>(null);
 
   // Initialize SmartAccount once to avoid WASM re-init crashes
@@ -99,9 +101,9 @@ export default function App() {
       aaInitializing = true;
       try {
         const smartAccount = new SmartAccount(provider, {
-          projectId: '3a913b51-6884-4638-bd23-fa0d728c7975',
-          clientKey: 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
-          appId: '8c38a8da-9800-4764-9007-76d512c5163e',
+          projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
+          clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
+          appId: import.meta.env.VITE_PARTICLE_APP_ID,
           aaOptions: {
             accountContracts: {
               BICONOMY: [{ version: '2.0.0', chainIds: [42161] }]
@@ -132,7 +134,7 @@ export default function App() {
   const USDC_E_ADDRESS = '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8'; // Bridged USDC.e on Arbitrum
   const USDC_DECIMALS = 6; 
   const USDC_E_DECIMALS = 6;
-  const ENTRY_FEE = 0.10;
+  const ENTRY_FEE = 0.25;
 
   const notify = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -142,183 +144,206 @@ export default function App() {
     }, 5000);
   };
 
-  const handleTopUp = async (explicitAmount?: number, explicitType?: string, explicitAddr?: string) => {
-    const targetAddr = explicitAddr || (window as any)._targetDepositAddr;
-    const targetType = explicitType || (window as any)._targetDepositType;
-    const amount = explicitAmount !== undefined ? explicitAmount : Number(topUpAmount);
-
-    if (!userInfo?.uuid || !amount || amount <= 0 || !targetAddr) return;
+  const handleTopUp = async (amount: number, targetType: string, targetAddr: string, tokenAddress: string = USDC_ADDRESS) => {
+    if (!userInfo?.uuid || isProcessing) return;
     
     setIsProcessing(true);
+    const tokenSymbol = tokenAddress.toLowerCase() === USDC_E_ADDRESS.toLowerCase() ? 'USDC.e' : 'USDC';
     try {
-      notify(`Initiating deposit of ${amount} USDC from ${targetType}...`, 'info');
+      notify(`Initiating deposit of ${amount.toFixed(2)} ${tokenSymbol} from ${targetType}...`, 'info');
 
       if (!provider) throw new Error('No wallet provider found');
 
-      // Find the balance of the specific target address
-      const targetNode = detectedAddresses.find(d => d.addr.toLowerCase() === targetAddr.toLowerCase());
-      const availableBal = targetNode ? targetNode.bal : 0;
+      // Smart Account instance will be handled by the logic below based on targetType/targetAddr
+
+      const currentActiveAddr = await smartAccountRef.current?.getAddress();
       
-      // Cap the amount to the available balance in that specific wallet
-      let finalAmount = amount;
-      if (finalAmount > availableBal) {
-        console.warn(`[TopUp] Requested ${finalAmount} but only ${availableBal} available in target node. Capping.`);
-        finalAmount = availableBal;
-      }
+      // Determine if we need a different Smart Account instance (e.g. V1 instead of V2)
+      const isSA = targetType?.toLowerCase().includes('biconomy') || targetType?.toLowerCase().includes('simple');
+      
+        let saInstance = smartAccountRef.current;
+        let activeAddress = currentActiveAddr;
 
-      if (finalAmount <= 0) throw new Error('Target wallet has no USDC balance');
-
-      // Force correct Biconomy version before proceeding
-      if (targetType && targetType.includes('biconomy')) {
-        const targetVersion = targetType.includes('v1') ? '1.0.0' : '2.0.0';
-        const currentOptions = (smartAccountRef.current as any)?.options;
-        const currentVersion = currentOptions?.aaOptions?.accountContracts?.BICONOMY?.[0]?.version;
-        
-        if (currentVersion !== targetVersion) {
-           console.log(`[TopUp] Switching Biconomy from ${currentVersion} to ${targetVersion}`);
-           smartAccountRef.current = new (smartAccountRef.current as any).constructor(particle.ethProvider, {
-             projectId: "9c3c588e-4a6c-48c9-8d76-5835698b58a1",
-             clientKey: "cl6mD9IOfn6H9v3p2SgRCH9oF86tQn6kLg9rL5qN",
-             appId: "c29e2f42-7a0e-473d-9d10-3375868a984a",
-             aaOptions: {
-               accountContracts: {
-                 BICONOMY: [{ version: targetVersion, chainIds: [42161] }]
-               }
-             }
-           });
+        if (isSA && (!currentActiveAddr || targetAddr?.toLowerCase() !== currentActiveAddr.toLowerCase())) {
+          notify(`Switching to ${targetType} node...`, 'info');
+          const targetVersion = targetType.toLowerCase().includes('v1') ? '1.0.0' : '2.0.0';
+          const targetName = targetType.toLowerCase().includes('biconomy') ? 'BICONOMY' : 'SIMPLE';
+          
+          saInstance = new SmartAccount(provider as any, {
+            projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
+            clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
+            appId: import.meta.env.VITE_PARTICLE_APP_ID,
+            aaOptions: {
+              accountContracts: {
+                [targetName]: [{ version: targetVersion, chainIds: [42161] }]
+              }
+            }
+          });
+          activeAddress = await saInstance.getAddress();
+          console.log(`[TopUp] Initialized temporary ${targetType} instance at ${activeAddress}`);
         }
-      }
 
-      const activeAddress = await smartAccountRef.current?.getAddress();
-      const isSmartAccount = 
-        targetType?.toLowerCase().includes('biconomy') || 
-        targetType?.toLowerCase().includes('simple') ||
-        (activeAddress && targetAddr?.toLowerCase() === activeAddress.toLowerCase());
+        const isSmartAccount = !!saInstance && activeAddress && targetAddr?.toLowerCase() === activeAddress.toLowerCase();
 
-      let txHash = '';
-      if (isSmartAccount) {
-        // --- SMART ACCOUNT DEPOSIT ---
-        if (!smartAccountRef.current) throw new Error('Smart Account not ready. Please refresh.');
-        
-        notify(`Preparing Smart Account transfer of ${finalAmount.toFixed(6)} USDC...`, 'info');
-        const usdcInterface = new ethers.Interface(["function transfer(address to, uint256 amount) returns (bool)"]);
-        const callData = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
-
-        // Some SDK versions prefer an array of transactions
-        const tx = { to: USDC_ADDRESS, data: callData, value: '0x0' };
-
-        // Get fee quotes to find a paymaster (Smart Account has no ETH for gas)
-        console.log('[AA] Estimating gas for:', tx);
-        const feeQuotes = await smartAccountRef.current.getFeeQuotes(tx);
-        console.log('[AA] Fee quotes received:', JSON.stringify(feeQuotes, null, 2));
-
-        if (feeQuotes.verifyingPaymasterGasless) {
-          console.log('[AA] Using gasless paymaster');
-          notify('Sponsoring gas fees...', 'info');
-          txHash = await smartAccountRef.current.sendTransaction({
-            tx,
-            feeQuote: feeQuotes.verifyingPaymasterGasless.feeQuote,
-          } as any);
-        } else if (feeQuotes.tokenPaymaster?.feeQuotes?.length) {
-          const usdcFee = feeQuotes.tokenPaymaster.feeQuotes.find(
-            (q: any) => q.tokenInfo.address.toLowerCase() === USDC_ADDRESS.toLowerCase()
-          ) || feeQuotes.tokenPaymaster.feeQuotes[0];
+        let txHash = '';
+        if (isSmartAccount && saInstance) {
+          notify(`Analyzing gas logistics...`, 'info');
+          const usdcInterface = new ethers.Interface(["function transfer(address to, uint256 amount) returns (bool)", "function balanceOf(address) view returns (uint256)"]);
           
-          console.log('[AA] Using token paymaster, fee:', usdcFee);
-          
-          // DEDUCT FEE: Check if we have enough total balance for amount + fee
-          const feeAmount = Number(usdcFee.fee) / 10 ** usdcFee.tokenInfo.decimals;
-          if (finalAmount + feeAmount > availableBal) {
-            // Deduct fee plus a 5% buffer for slippage/price changes
-            const buffer = feeAmount * 0.05;
-            const adjustedAmount = Math.max(0, finalAmount - feeAmount - buffer);
-            console.log(`[TopUp] Adjusting for fees: ${finalAmount} -> ${adjustedAmount}`);
+          const browserProvider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
+          const tokenContract = new ethers.Contract(tokenAddress, ["function balanceOf(address) view returns (uint256)"], browserProvider);
+          const rawBal = await tokenContract.balanceOf(activeAddress);
+          const actualTransferBal = Number(ethers.formatUnits(rawBal, 6));
+
+          // Get Fee Quotes safely
+          const probeTx = { 
+            to: tokenAddress, 
+            data: usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits("0.000001", 6)]), 
+            value: '0x0' 
+          };
+          const feeQuotes = await saInstance.getFeeQuotes(probeTx);
+
+          const finalTx = { to: tokenAddress, data: '', value: '0x0' };
+
+          if (feeQuotes.verifyingPaymasterGasless) {
+            notify('Sponsoring gas fees...', 'info');
+            let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
+            finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
             
-            if (adjustedAmount <= 0) throw new Error(`Insufficient USDC for fees ($${feeAmount.toFixed(4)})`);
-            
-            // Update the transaction data with the adjusted amount
-            const newCallData = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(adjustedAmount.toFixed(6), 6)]);
-            tx.data = newCallData;
-            notify(`Adjusting to $${adjustedAmount.toFixed(3)} to cover gas fees...`, 'info');
+            txHash = await saInstance.sendTransaction({
+              tx: finalTx,
+              feeQuote: feeQuotes.verifyingPaymasterGasless.feeQuote,
+            } as any);
+          } else if (feeQuotes.tokenPaymaster?.feeQuotes?.length) {
+            const quotes = feeQuotes.tokenPaymaster.feeQuotes;
+            const balanceChecks = await Promise.all(quotes.map(async (q: any) => {
+              const contract = new ethers.Contract(q.tokenInfo.address, ["function balanceOf(address) view returns (uint256)"], browserProvider);
+              const bal = await contract.balanceOf(activeAddress);
+              return { quote: q, balance: Number(ethers.formatUnits(bal, q.tokenInfo.decimals)) };
+            }));
+
+            const bestQuoteObj = balanceChecks.find(b => 
+              b.quote.tokenInfo.address.toLowerCase() === tokenAddress.toLowerCase() && 
+              b.balance > (Number(b.quote.fee) / 10**b.quote.tokenInfo.decimals)
+            ) || balanceChecks.find(b => b.balance >= (Number(b.quote.fee) / 10**b.quote.tokenInfo.decimals));
+
+            if (!bestQuoteObj) throw new Error(`Insufficient funds for gas. Need ~$0.02 in any USDC or ETH.`);
+
+            const selectedQuote = bestQuoteObj.quote;
+            const feeAmount = Number(selectedQuote.fee) / 10 ** selectedQuote.tokenInfo.decimals;
+            const isSameToken = selectedQuote.tokenInfo.address.toLowerCase() === tokenAddress.toLowerCase();
+
+            let finalAmount = amount;
+            if (isSameToken) {
+              const maxSafe = Math.floor((actualTransferBal - feeAmount - 0.01) * 1000000) / 1000000;
+              finalAmount = Math.min(amount, maxSafe);
+            } else {
+              finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
+            }
+
+            if (finalAmount <= 0) throw new Error(`Insufficient ${tokenSymbol}: Balance $${actualTransferBal.toFixed(4)}, Gas Fee $${feeAmount.toFixed(4)}`);
+
+            finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
+            notify(`Paying gas with ${selectedQuote.tokenInfo.symbol}...`, 'info');
+            txHash = await saInstance.sendTransaction({
+              tx: finalTx,
+              feeQuote: selectedQuote,
+              tokenPaymasterAddress: feeQuotes.tokenPaymaster.tokenPaymasterAddress,
+            } as any);
+          } else {
+            let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
+            finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
+            txHash = await saInstance.sendTransaction({ tx: finalTx } as any);
           }
-
-          notify(`Paying gas with ${usdcFee.tokenInfo.symbol}...`, 'info');
-          txHash = await smartAccountRef.current.sendTransaction({
-            tx,
-            feeQuote: usdcFee,
-            tokenPaymasterAddress: feeQuotes.tokenPaymaster.tokenPaymasterAddress,
-          } as any);
         } else {
-          console.log('[AA] No paymaster available, attempting native gas');
-          notify('Signing transaction...', 'info');
-          txHash = await smartAccountRef.current.sendTransaction({ tx } as any);
-        }
-        
-        console.log('[TopUp] TX Hash:', txHash);
-        notify('Transaction broadcasted! Syncing credits...', 'info');
-      } else {
-        // --- STANDARD EOA DEPOSIT ---
         const browserProvider = new ethers.BrowserProvider(provider as any);
         const signer = await browserProvider.getSigner();
-        const usdcContract = new ethers.Contract(USDC_ADDRESS, ["function transfer(address to, uint256 amount) returns (bool)"], signer);
+        const usdcContract = new ethers.Contract(tokenAddress, [
+          "function transfer(address to, uint256 amount) returns (bool)",
+          "function balanceOf(address) view returns (uint256)"
+        ], signer);
         
-        notify(`Requesting signature for ${finalAmount.toFixed(6)} USDC...`, 'info');
-        const tx = await usdcContract.transfer(PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6));
-        notify('Transaction sent! Confirming on-chain...', 'info');
-        const receipt = await tx.wait();
-        if (!receipt || receipt.status !== 1) throw new Error('Transaction failed on-chain');
-        txHash = tx.hash;
-      }
-
-      // Call backend to verify and add credits
-      const { data: { session: authSession } } = await supabase.auth.getSession();
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash: txHash } })
-      });
-
-      const result = await res.json();
-      if (result.success) {
-        notify(`Successfully added ${result.added} credits!`, 'success');
-        // Update local profile state immediately for real-time dashboard feedback
-        if (userProfile) {
-          const updatedBal = result.newBalance;
-          setUserProfile({ ...userProfile, balance: updatedBal });
-          setBalance(updatedBal);
+        const rawBalance = await usdcContract.balanceOf(targetAddr);
+        const actualBalance = Number(ethers.formatUnits(rawBalance, 6));
+        
+        let finalAmount = amount;
+        if (finalAmount > actualBalance) {
+          finalAmount = actualBalance;
+          notify(`Adjusting to max available balance: $${finalAmount.toFixed(2)}`, 'info');
         }
-        await fetchUserData();
-      } else {
-        // --- GRACEFUL INDEXING HANDLING ---
-        // If the backend says 'not detected yet' but we KNOW the tx was broadcasted successfully
-        if (result.error?.toLowerCase().includes('not detected yet')) {
-          notify('Confirmed! Your balance is syncing on-chain...', 'success');
-          // Start a background polling loop to update the balance once indexed
-          let checkCount = 0;
-          const poll = setInterval(async () => {
-            checkCount++;
-            const { data } = await supabase.from('profiles').select('balance').eq('id', userInfo.uuid).single();
-            if (data?.balance && data.balance > (userProfile?.balance || 0)) {
-              setBalance(data.balance);
-              setUserProfile(prev => prev ? { ...prev, balance: data.balance } : null);
-              clearInterval(poll);
-            }
-            if (checkCount > 10) clearInterval(poll);
-          }, 3000);
-        } else {
-          throw new Error(result.error || 'Failed to award credits');
+
+        if (finalAmount <= 0) throw new Error(`Insufficient ${tokenSymbol} balance`);
+
+        notify(`Requesting signature for $${finalAmount.toFixed(2)}...`, 'info');
+        try {
+          const tx = await usdcContract.transfer(PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6));
+          const receipt = await tx.wait();
+          if (!receipt || receipt.status !== 1) throw new Error('Transaction failed');
+          txHash = tx.hash;
+        } catch (txErr: any) {
+          if (txErr.message?.toLowerCase().includes('estimategas') || txErr.code === 'INSUFFICIENT_FUNDS') {
+            throw new Error(`Gas estimation failed. This standard wallet requires ETH to pay for gas. Please use a Smart Account for a gassless experience.`);
+          }
         }
       }
     } catch (err: any) {
-      console.error('[TopUp] Error:', err);
-      notify(err.reason || err.message || 'Top-up failed', 'error');
-    } finally {
-      setIsProcessing(false);
+      console.error('Topup failed:', err);
+      notify(err.message || 'Top-up failed', 'error');
+      setIsProcessing(false); // Only stop on initial failure
     }
-  };
+
+      if (txHash) {
+        setSyncingTxHash(txHash);
+        notify('Transaction sent! Finalizing deposit...', 'info');
+        
+        let attempts = 0;
+        const pollDeposit = async () => {
+          try {
+            const { data: { session: authSession } } = await supabase.auth.getSession();
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+              },
+              body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash } })
+            });
+
+            const result = await res.json();
+            if (result.success) {
+              notify(`Success! Added $${result.added.toFixed(2)} to your balance.`, 'success');
+              setBalance(result.newBalance);
+              setSyncingTxHash(null);
+              setIsProcessing(false);
+              fetchUserData();
+              return true; // Stop polling
+            } else if (res.status === 400 && (result.error?.toLowerCase().includes('not detected yet') || result.error?.toLowerCase().includes('timeout'))) {
+              attempts++;
+              if (attempts % 3 === 0) notify(`Syncing with blockchain... (Attempt ${attempts})`, 'info');
+              return false; // Continue polling
+            } else {
+              throw new Error(result.error || 'Failed to award credits');
+            }
+          } catch (err: any) {
+            console.log('[Sync] Wait condition:', err.message);
+            return false;
+          }
+        };
+
+        // Start polling
+        const interval = setInterval(async () => {
+          const finished = await pollDeposit();
+          if (finished) clearInterval(interval);
+        }, 5000);
+
+        // Also check once immediately
+        pollDeposit().then(finished => { if (finished) clearInterval(interval); });
+        // Safety timeout: stop processing after 2 minutes
+        setTimeout(() => setIsProcessing(false), 120000);
+      }
+    };
+
+
 
   const isAdmin = useMemo(() => {
     const eoaWallet = userInfo?.wallets?.find((w: any) => w.type?.toLowerCase() === 'eoa')?.public_address;
@@ -437,24 +462,19 @@ export default function App() {
           fetchCall(USDC_E_ADDRESS)
         ]);
 
-        console.log(`[Diagnostic] Raw balances for ${targetAddr.slice(0, 8)}...:`, { resUSDC, resUSDCe });
-
-        // If both fail, return null to signal a fetch error
         if (resUSDC === null && resUSDCe === null) return null;
 
-        let total = 0;
+        let nativeBal = 0;
+        let bridgedBal = 0;
+
         if (resUSDC && resUSDC !== '0x' && resUSDC.length > 2) {
-          try {
-            total += Number(BigInt(resUSDC)) / Math.pow(10, USDC_DECIMALS);
-          } catch (e) { console.warn('Failed to parse USDC balance:', resUSDC); }
+          nativeBal = Number(BigInt(resUSDC)) / Math.pow(10, USDC_DECIMALS);
         }
         if (resUSDCe && resUSDCe !== '0x' && resUSDCe.length > 2) {
-          try {
-            total += Number(BigInt(resUSDCe)) / Math.pow(10, USDC_DECIMALS);
-          } catch (e) { console.warn('Failed to parse USDC.e balance:', resUSDCe); }
+          bridgedBal = Number(BigInt(resUSDCe)) / Math.pow(10, USDC_E_DECIMALS);
         }
 
-        return total;
+        return { nativeBal, bridgedBal, total: nativeBal + bridgedBal };
       };
 
       const scanSet = new Set<string>();
@@ -506,11 +526,13 @@ export default function App() {
         if (processedAddrs.has(addr)) continue;
         processedAddrs.add(addr);
 
-        const bal = await getBalance(addr);
-        if (bal === null) {
+        const balData = await getBalance(addr);
+        if (balData === null) {
           hasError = true;
           continue;
         }
+        
+        const bal = balData.total;
         
         let type = 'EOA/External';
         const isTreasury = addr.toLowerCase() === PRIMARY_WALLET.toLowerCase();
@@ -530,9 +552,30 @@ export default function App() {
           totalWalletBalance += bal;
         }
         
-        newDetected.push({ addr, bal, type });
+        newDetected.push({ 
+          addr, 
+          bal, 
+          type, 
+          nativeBal: balData.nativeBal, 
+          bridgedBal: balData.bridgedBal 
+        });
       }
       setDetectedAddresses(newDetected);
+
+      // Find the best wallet for quick top-up (Prioritize GASSLESS Smart Accounts)
+      const allOptions: any[] = [];
+      newDetected.forEach(d => {
+        if (d.type === 'House Treasury') return;
+        const isSA = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
+        const priority = isSA ? 1000 : 1; // Heavy priority for SA
+        
+        if (d.nativeBal > 0) allOptions.push({ addr: d.addr, bal: d.nativeBal, type: d.type, token: USDC_ADDRESS, priority });
+        if (d.bridgedBal > 0) allOptions.push({ addr: d.addr, bal: d.bridgedBal, type: d.type, token: USDC_E_ADDRESS, priority });
+      });
+      
+      // Sort by priority first, then balance
+      const best = allOptions.sort((a, b) => (b.priority + b.bal) - (a.priority + a.bal))[0];
+      setBestWallet(best || null);
 
       console.log(`[Diagnostic] Total Aggregate Wallet Balance: ${totalWalletBalance}`);
       setTotalWalletBalance(totalWalletBalance);
@@ -559,7 +602,10 @@ export default function App() {
         finalInjected = 0;
       }
 
-      const primaryAddr = forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
+      // Prioritize Smart Account for the primary address (enables gassless experience)
+      const smartAddr = aaExtras?.biconomyAddress || aaExtras?.simpleAddress || (userInfo as any).biconomyV1Address || (userInfo as any).simpleV2Address;
+      const primaryAddr = forcedAddress || smartAddr || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
+      
       if (primaryAddr && !userAddress) setUserAddress(primaryAddr);
 
       if (data) {
@@ -808,16 +854,16 @@ export default function App() {
 
 
   const startGame = async () => {
-    if (selectedGame === 'SLITHER') {
-       if (!isTestMode && balance < 0.10) {
-         setConfirmModal({
-           show: true,
-           title: 'Insufficient Credits',
-           message: '$0.10 Entry Fee required. Please top up your balance to continue.',
-           onConfirm: () => setIsDepositWizardOpen(true)
-         });
-         return;
-       }
+     if (selectedGame === 'SLITHER') {
+        if (!isTestMode && balance < 0.25) {
+          setConfirmModal({
+            show: true,
+            title: 'Insufficient Credits',
+            message: '$0.25 Entry Fee required. Please top up your balance to continue.',
+            onConfirm: () => setIsDepositWizardOpen(true)
+          });
+          return;
+        }
 
         setIsProcessing(true);
         try {
@@ -846,7 +892,7 @@ export default function App() {
           setScore(0);
           setCurrentSessionLoot(0);
           setCurrentPage('PLAYING');
-          if (!isTestMode) notify('Session Started: -$0.10', 'info');
+          if (!isTestMode) notify('Session Started: -$0.25', 'info');
           else notify('Test Session Started (Free)', 'info');
         } catch (err: any) {
           console.error('Start game error:', err);
@@ -925,7 +971,7 @@ export default function App() {
     const roundedScore = Math.floor(finalScore);
     
     // Detailed Breakdown Math based on PNL
-    const netPnl = Math.max(0, collectedMoney - ENTRY_FEE);
+    const netPnl = Math.max(0, collectedMoney - 0.25);
     const penaltyAmount = netPnl * 0.50; // User loses 50% of gain
     const dropAmount = netPnl * 0.40;    // 40% of gain is dropped
     const houseRake = netPnl * 0.05;     // 5% of gain is fee
@@ -1111,6 +1157,14 @@ export default function App() {
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Balance</span>
                     <span className="text-sm font-black text-white italic">${Number(userProfile?.balance || 0).toFixed(2)}</span>
+                    <button 
+                      onClick={fetchUserData}
+                      disabled={isProcessing}
+                      className="p-1 hover:bg-sky-500/10 text-sky-400 rounded transition-all disabled:opacity-30 group"
+                      title="Sync Node"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isProcessing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                    </button>
                   </div>
                 </div>
 
@@ -1167,14 +1221,6 @@ export default function App() {
                      <button onClick={fetchUserData} className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-slate-800/60 hover:bg-slate-700 text-sky-400 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl border-none">
                         <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin' : ''}`} />
                         <span>SYNC</span>
-                     </button>
-                     <button 
-                        disabled={isProcessing}
-                        onClick={() => setIsDepositWizardOpen(true)}
-                        className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-emerald-500/20 disabled:opacity-50 border-none"
-                     >
-                        <PlusCircle className="w-3.5 h-3.5" />
-                        <span>TOPUP</span>
                      </button>
                      <button onClick={() => setIsWalletOpen(true)} className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-sky-500/20 border-none">
                         <Wallet className="w-3.5 h-3.5" />
@@ -1246,87 +1292,207 @@ export default function App() {
                 </div>
               )}
             </div>
-
-            {/* Performance Analytics - Optimized Grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8">
-              <div className="col-span-2 p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] space-y-4 md:space-y-6 shadow-2xl relative overflow-hidden group border-none">
-                <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
-                   <TrendingUp className="w-32 h-32 md:w-48 md:h-48" />
+            {/* Performance Analytics - Reimagined 4-Column Grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+              
+              {/* CARD 1: PERFORMANCE NODE */}
+              <div className="p-5 md:p-7 premium-glass rounded-[2rem] shadow-2xl relative overflow-hidden group border-none flex flex-col justify-between min-h-[240px]">
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+                <div className="relative z-10 space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full animate-pulse ${isProfitable ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.5)]'}`}></div>
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em]">Performance</span>
+                    </div>
+                    <TrendingUp className={`w-4 h-4 ${isProfitable ? 'text-emerald-400' : 'text-red-400 rotate-180'}`} />
+                  </div>
+                  <div className="space-y-1">
+                    <p className={`text-3xl md:text-5xl font-black italic tracking-tighter leading-none ${isProfitable ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {isProfitable ? '+' : '-'}${Math.abs(pnl).toFixed(2)}
+                    </p>
+                    <p className="text-[8px] text-slate-500 font-black uppercase tracking-widest opacity-60">Net Protocol Yield</p>
+                  </div>
                 </div>
-                <div className="relative z-10 space-y-2">
-                   <p className="text-sky-400 font-mono text-[10px] md:text-xs uppercase tracking-[0.3em] font-black">Gross Performance</p>
-                   <div className={`text-3xl md:text-6xl font-black flex items-center gap-3 md:gap-5 italic tracking-tighter ${isProfitable ? 'text-emerald-400' : 'text-red-400'}`}>
-                     {isProfitable ? <TrendingUp className="w-8 h-8 md:w-14 md:h-14" /> : <TrendingDown className="w-8 h-8 md:w-14 md:h-14" />}
-                     {Number(Math.abs(pnl) || 0).toFixed(2)} <span className="text-lg md:text-3xl font-bold not-italic text-slate-500 uppercase tracking-normal">USDC</span>
+                <div className="relative z-10 pt-4 border-t border-white/5">
+                   <div className="flex justify-between items-center">
+                      <span className="text-[8px] text-slate-500 uppercase font-black tracking-widest">Status</span>
+                      <span className={`text-[9px] font-black px-3 py-1 rounded-full ${isProfitable ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                        {isProfitable ? 'OPTIMIZED' : 'DEFICIT'}
+                      </span>
                    </div>
                 </div>
-                
-                <div className="pt-4 grid grid-cols-2 gap-3 md:gap-6 relative z-10">
-                  <div className="p-4 md:p-6 bg-slate-950/40 rounded-2xl md:rounded-3xl border-none">
-                    <p className="text-slate-500 text-[9px] md:text-[11px] uppercase font-black mb-1 tracking-widest">Wagered</p>
-                    <p className="text-lg md:text-2xl font-black italic text-white tracking-tighter">{Number(totalInjected || 0).toFixed(2)}</p>
+              </div>
+
+              {/* CARD 2: FUNDING NODE */}
+              <div className="p-5 md:p-7 premium-glass rounded-[2rem] shadow-2xl relative overflow-hidden group border-none flex flex-col justify-between min-h-[240px]">
+                <div className="relative z-10 space-y-4 h-full">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em]">Funding Node</span>
+                    <ArrowUpCircle className="w-4 h-4 text-sky-500/60" />
                   </div>
-                  <div className="p-4 md:p-6 bg-slate-950/40 rounded-2xl md:rounded-3xl border-none">
-                    <p className="text-slate-500 text-[9px] md:text-[11px] uppercase font-black mb-1 tracking-widest">Available</p>
-                    <div className="flex items-center justify-between">
-                      <p className="text-lg md:text-2xl font-black italic text-white tracking-tighter">
-                        {isBalanceVisible ? `${Number(userProfile?.balance || 0).toFixed(2)}` : '••••'}
-                      </p>
-                      <button onClick={() => setIsBalanceVisible(!isBalanceVisible)} className="text-slate-600 hover:text-sky-400 transition-colors">
-                        {isBalanceVisible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                      </button>
+                  
+                  <div className="flex gap-4">
+                    <div className="p-3 bg-white/10 rounded-2xl border-none shadow-xl flex-shrink-0 group-hover:scale-105 transition-transform duration-500">
+                      <QRCodeCanvas 
+                        value={userAddress || '0x'} 
+                        size={64}
+                        bgColor={"transparent"}
+                        fgColor={"#38bdf8"}
+                        level={"M"}
+                        includeMargin={false}
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1.5 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest leading-none">Best Topup Source</p>
+                        <button 
+                          onClick={() => {
+                            navigator.clipboard.writeText(userAddress);
+                            notify('Wallet address copied!', 'success');
+                          }}
+                          className="flex items-center gap-1.5 px-2 py-1 hover:bg-sky-500/10 text-sky-400 rounded transition-all border border-sky-500/0 hover:border-sky-500/20"
+                          title="Copy Address"
+                        >
+                          <span className="text-[8px] font-black uppercase tracking-wider">{userAddress?.slice(0, 6)}...{userAddress?.slice(-4)}</span>
+                          <Copy className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                      {bestWallet ? (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-black text-white truncate leading-none uppercase">{bestWallet.type}</p>
+                          <p className="text-[10px] font-mono text-emerald-400 font-bold leading-none">${bestWallet.bal.toFixed(2)} {bestWallet.token === USDC_E_ADDRESS ? 'USDC.e' : 'USDC'}</p>
+                          <button 
+                            onClick={() => handleTopUp(bestWallet.bal, bestWallet.type, bestWallet.addr, bestWallet.token)}
+                            disabled={isProcessing || !!syncingTxHash}
+                            className={`mt-2 w-full py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-[0.98] shadow-lg ${
+                              syncingTxHash 
+                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
+                                : 'bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-sky-500/20'
+                            } disabled:opacity-50`}
+                          >
+                            {isProcessing ? 'Processing...' : syncingTxHash ? 'Syncing...' : 'Quick Top Up'}
+                          </button>
+                          {syncingTxHash && (
+                            <div className="flex items-center gap-1.5 mt-2 justify-center">
+                              <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></div>
+                              <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest">Awaiting On-Chain Node</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <p className="text-xs font-bold text-slate-500 italic">No funds found</p>
+                          <button 
+                            onClick={() => setIsWalletOpen(true)}
+                            className="mt-2 w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all"
+                          >
+                            Open Wallet
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] flex flex-col justify-between shadow-2xl group border-none">
-                <div className="space-y-1">
-                   <p className="text-sky-400 font-mono text-[10px] md:text-xs uppercase tracking-[0.2em] font-black">Runtime</p>
-                   <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black opacity-60">Sessions</p>
-                </div>
-                <div className="text-5xl md:text-8xl font-black text-white italic tracking-tighter group-hover:scale-105 transition-transform duration-500">{totalSessions}</div>
-                <div className="h-1.5 w-full bg-slate-950/50 rounded-full overflow-hidden mt-4">
-                   <div className="h-full bg-sky-500/50 w-2/3"></div>
+              {/* CARD 3: ANALYTICS HUB */}
+              <div className="p-5 md:p-7 premium-glass rounded-[2rem] shadow-2xl relative overflow-hidden group border-none flex flex-col justify-between min-h-[240px]">
+                <div className="relative z-10 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em]">Operational</span>
+                    <Activity className="w-4 h-4 text-slate-500" />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-end border-b border-white/5 pb-2">
+                      <div className="space-y-0.5">
+                        <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest leading-none">Sessions</p>
+                        <p className="text-xl font-black text-white italic leading-none">{totalSessions}</p>
+                      </div>
+                      <div className="h-6 w-1 bg-sky-500/20 rounded-full overflow-hidden">
+                        <div className="h-1/2 w-full bg-sky-500"></div>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-end border-b border-white/5 pb-2">
+                      <div className="space-y-0.5">
+                        <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest leading-none">Max Mass</p>
+                        <p className="text-xl font-black text-white italic leading-none">{highScore}</p>
+                      </div>
+                      <div className="h-6 w-1 bg-yellow-500/20 rounded-full overflow-hidden">
+                        <div className="h-3/4 w-full bg-yellow-500"></div>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-end">
+                      <div className="space-y-0.5">
+                        <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest leading-none">Uptime</p>
+                        <p className="text-xl font-black text-white italic leading-none">24h</p>
+                      </div>
+                      <div className="h-6 w-1 bg-emerald-500/20 rounded-full overflow-hidden">
+                        <div className="h-full w-full bg-emerald-500"></div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-
-              {isAdmin && (
-                <div className="p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] flex flex-col justify-between shadow-2xl group border-none bg-emerald-500/5">
-                  <div className="space-y-1">
-                     <p className="text-emerald-400 font-mono text-[10px] md:text-xs uppercase tracking-[0.2em] font-black">Liquidity</p>
-                     <p className="text-[10px] text-emerald-500/40 uppercase tracking-widest font-black">Treasury</p>
+              {/* CARD 4: ECONOMIC FLOW */}
+              <div className="p-5 md:p-7 premium-glass rounded-[2rem] shadow-2xl relative overflow-hidden group border-none flex flex-col justify-between min-h-[240px]">
+                <div className="relative z-10 space-y-4 h-full">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em]">Economic Flow</span>
+                      {syncingTxHash ? (
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-sky-500/10 rounded-full">
+                          <RefreshCw className="w-2.5 h-2.5 text-sky-400 animate-spin" />
+                          <span className="text-[8px] font-black text-sky-400 uppercase tracking-widest">Syncing...</span>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => {
+                            notify('Reconciling balances...', 'info');
+                            fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                              },
+                              body: JSON.stringify({ 
+                                action: 'SYSTEM_RESET', 
+                                payload: { targetUserId: userInfo.uuid } 
+                              })
+                            })
+                            .then(res => res.json())
+                            .then(data => {
+                              notify('Balance synchronized!', 'success');
+                              fetchUserData();
+                            })
+                            .catch(err => notify('Sync failed', 'error'));
+                          }}
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-sky-400 transition-all active:scale-90"
+                          title="Sync with On-chain"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isProcessing ? 'animate-spin' : ''}`} />
+                        </button>
+                      )}
+                    </div>
+                    <Coins className="w-4 h-4 text-yellow-500/60" />
                   </div>
-                  <div className="text-4xl md:text-7xl font-black text-white italic tracking-tighter group-hover:scale-105 transition-transform duration-500">
-                    ${treasuryBalance.toFixed(2)}
+                  <div className="flex-1 space-y-2">
+                    <div className="p-3 bg-white/5 rounded-2xl border-none group-hover:bg-white/10 transition-colors">
+                      <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest mb-1 leading-none">Wagered</p>
+                      <p className="text-lg font-black text-white italic tracking-tighter leading-none">${Number(totalInjected || 0).toFixed(2)}</p>
+                    </div>
+                    <div className="p-3 bg-white/5 rounded-2xl border-none group-hover:bg-white/10 transition-colors">
+                      <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest mb-1 leading-none">Earnings</p>
+                      <p className="text-lg font-black text-emerald-400 italic tracking-tighter leading-none">${(Number(userProfile?.balance || 0) + Number(totalWithdrawn || 0)).toFixed(2)}</p>
+                    </div>
+                    <div className="p-3 bg-white/5 rounded-2xl border-none group-hover:bg-white/10 transition-colors">
+                      <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest mb-1 leading-none">Cashed</p>
+                      <p className="text-lg font-black text-sky-400 italic tracking-tighter leading-none">${Number(totalWithdrawn || 0).toFixed(2)}</p>
+                    </div>
                   </div>
-                  
-                  <div className="flex items-center gap-2 mt-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                    <span className="text-[10px] font-mono text-emerald-500/60 uppercase font-black tracking-widest">
-                      Gas Reserve: {treasuryEthBalance.toFixed(4)} ETH
-                    </span>
-                  </div>
-
-                  <div className="h-1.5 w-full bg-emerald-950/50 rounded-full overflow-hidden mt-4">
-                     <div className="h-full bg-emerald-500/50 w-full animate-pulse"></div>
-                  </div>
-                </div>
-              )}
-
-              <div className="p-6 md:p-10 premium-glass rounded-[2rem] md:rounded-[3rem] flex flex-col justify-between shadow-2xl group border-none">
-                <div className="space-y-1">
-                   <p className="text-yellow-400 font-mono text-[10px] md:text-xs uppercase tracking-[0.2em] font-black">Dominance</p>
-                   <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black opacity-60">Max Mass</p>
-                </div>
-                <div className="text-5xl md:text-8xl font-black text-yellow-400 italic tracking-tighter group-hover:scale-105 transition-transform duration-500">{Math.floor(highScore)}</div>
-                <div className="h-1.5 w-full bg-slate-950/50 rounded-full overflow-hidden mt-4">
-                   <div className="h-full bg-yellow-500/50 w-1/2"></div>
                 </div>
               </div>
             </div>
 
-            {/* Primary Protocol Access */}
             <div className="pt-4 pb-12">
               <button 
                 onClick={startGame}
@@ -1346,7 +1512,7 @@ export default function App() {
                           <span className="text-sky-400 font-mono text-[10px] uppercase font-black tracking-[0.3em]">Protocol Active</span>
                        </div>
                        <div className="px-5 py-2 bg-yellow-500/20 rounded-full backdrop-blur-xl border-none">
-                          <span className="text-yellow-400 font-mono text-[10px] uppercase font-black tracking-[0.3em]">$0.10 WAGER</span>
+                          <span className="text-yellow-400 font-mono text-[10px] uppercase font-black tracking-[0.3em]">${ENTRY_FEE.toFixed(2)} WAGER</span>
                        </div>
                     </div>
                     
@@ -1633,31 +1799,73 @@ export default function App() {
                       if (isSmart && d.bal <= 0) return false;
                       return true;
                     }).map((d, i) => (
-                      <div key={i} className="premium-glass p-4 rounded-2xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/[0.05] transition-all group/row">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-xl bg-slate-800/50 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
-                            <Wallet className="w-5 h-5" />
+                      <div key={i} className="space-y-2">
+                        {d.nativeBal > 0 && (
+                          <div className="premium-glass p-4 rounded-2xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/[0.05] transition-all group/row">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-xl bg-slate-800/50 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
+                                <Wallet className="w-5 h-5" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-black text-white group-hover/row:text-sky-400 transition-colors uppercase tracking-tight truncate">
+                                  {d.type} (USDC)
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-[10px] font-mono text-slate-500 truncate">{d.addr}</p>
+                                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple') ? 'bg-sky-500/10 text-sky-400' : 'bg-amber-500/10 text-amber-500'}`}>
+                                    {d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple') ? 'GASSLESS' : 'REQUIRES ETH'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <div className="text-right">
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Available</p>
+                                <p className="text-lg font-black text-white italic tracking-tighter leading-none">${d.nativeBal.toFixed(2)}</p>
+                              </div>
+                              <button 
+                                onClick={() => handleTopUp(d.nativeBal, d.type, d.addr, USDC_ADDRESS)} 
+                                disabled={isProcessing}
+                                className="px-6 py-2.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 disabled:grayscale text-slate-950 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-sky-500/10 transition-all active:scale-95 whitespace-nowrap"
+                              >
+                                {isProcessing ? 'Wait...' : 'Top Up'}
+                              </button>
+                            </div>
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-black text-white group-hover/row:text-sky-400 transition-colors uppercase tracking-tight truncate">{d.type}</p>
-                            <p className="text-[10px] font-mono text-slate-500 truncate max-w-[180px] sm:max-w-none">{d.addr}</p>
+                        )}
+                        {d.bridgedBal > 0 && (
+                          <div className="premium-glass p-4 rounded-2xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/[0.05] transition-all group/row">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-xl bg-slate-800/50 flex items-center justify-center text-emerald-400 group-hover/row:scale-110 transition-transform">
+                                <Wallet className="w-5 h-5" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-black text-white group-hover/row:text-emerald-400 transition-colors uppercase tracking-tight truncate">
+                                  {d.type} (USDC.e)
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-[10px] font-mono text-slate-500 truncate">{d.addr}</p>
+                                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple') ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-500'}`}>
+                                    {d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple') ? 'GASSLESS' : 'REQUIRES ETH'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <div className="text-right">
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Available</p>
+                                <p className="text-lg font-black text-emerald-400 italic tracking-tighter leading-none">${d.bridgedBal.toFixed(2)}</p>
+                              </div>
+                              <button 
+                                onClick={() => handleTopUp(d.bridgedBal, d.type, d.addr, USDC_E_ADDRESS)} 
+                                disabled={isProcessing}
+                                className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:grayscale text-slate-950 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-500/10 transition-all active:scale-95 whitespace-nowrap"
+                              >
+                                {isProcessing ? 'Wait...' : 'Top Up'}
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                        
-                        <div className="flex items-center justify-between sm:justify-end gap-6 border-t border-white/5 sm:border-none pt-3 sm:pt-0">
-                          <div className="text-right">
-                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Available</p>
-                            <p className="text-lg font-black text-white italic tracking-tighter leading-none">${d.bal.toFixed(2)}</p>
-                          </div>
-                          <button 
-                            onClick={() => {
-                              setTimeout(() => handleTopUp(d.bal, d.type, d.addr), 100);
-                            }}
-                            className="px-6 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-sky-500/10 transition-all active:scale-95 whitespace-nowrap"
-                          >
-                            Top Up
-                          </button>
-                        </div>
+                        )}
                       </div>
                     )) : (
                       <div className="text-center py-10 premium-glass rounded-2xl border-none">
@@ -1872,15 +2080,15 @@ export default function App() {
         </div>
       )}
       {/* Notification Toast System */}
-      <div className="fixed bottom-8 right-8 z-[1000] flex flex-col gap-3 pointer-events-none">
+      <div className="fixed bottom-4 left-4 right-4 md:bottom-8 md:right-8 md:left-auto z-[1000] flex flex-col gap-3 pointer-events-none items-center md:items-end">
         <AnimatePresence>
           {notifications.map((n) => (
             <motion.div
               key={n.id}
-              initial={{ opacity: 0, x: 50, scale: 0.9 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: 20, scale: 0.95 }}
-              className={`pointer-events-auto p-5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-4 min-w-[320px] ${
+              initial={{ opacity: 0, y: 20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, transition: { duration: 0.2 } }}
+              className={`pointer-events-auto p-4 md:p-5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-4 w-full max-w-[380px] md:min-w-[320px] ${
                 n.type === 'success' ? 'bg-emerald-500/10' :
                 n.type === 'error' ? 'bg-red-500/10' :
                 'bg-sky-500/10'

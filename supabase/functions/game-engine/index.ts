@@ -11,6 +11,27 @@ const corsHeaders = {
 
 const PRIMARY_WALLET = "0xf7dAd3bB9E89502d2e2ea478659875063b4f3F7A";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+const USDC_E_ADDRESS = "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8";
+
+async function getUSDCBalance(address: string) {
+  if (!address) return 0;
+  try {
+    const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
+    const abi = ["function balanceOf(address) view returns (uint256)"];
+    const native = new ethers.Contract(USDC_ADDRESS, abi, provider);
+    const bridged = new ethers.Contract(USDC_E_ADDRESS, abi, provider);
+    
+    const [nBal, bBal] = await Promise.all([
+      native.balanceOf(address).catch(() => 0n),
+      bridged.balanceOf(address).catch(() => 0n)
+    ]);
+    
+    return Number(nBal + bBal) / 1e6;
+  } catch (e) {
+    console.error(`[BalanceCheck] Error for ${address}:`, e.message);
+    return 0;
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -112,9 +133,9 @@ Deno.serve(async (req) => {
       if (fetchError || !profile) throw new Error('Profile not found');
       
       const isTest = payload.isTest || false;
-      if (!isTest && profile.balance < 0.10) throw new Error('Insufficient balance');
+      if (!isTest && profile.balance < 0.25) throw new Error('Insufficient balance');
 
-      const newBalance = isTest ? profile.balance : Number(profile.balance) - 0.10;
+      const newBalance = isTest ? profile.balance : Number(profile.balance) - 0.25;
 
       const { error: updateError } = await supabaseClient
         .from('profiles')
@@ -130,7 +151,7 @@ Deno.serve(async (req) => {
         .from('sessions')
         .insert([{
           user_id: userId,
-          buy_in: isTest ? 0 : 0.10,
+          buy_in: isTest ? 0 : 0.25,
           status: 'active',
           metadata: { isTest }
         }])
@@ -237,9 +258,8 @@ Deno.serve(async (req) => {
           const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
           const wallet = new ethers.Wallet(relayerKey, provider);
           
-          const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
           const usdcAbi = ["function transfer(address to, uint256 amount) returns (bool)"];
-          const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, wallet);
+          const usdcContract = new ethers.Contract(USDC_ADDRESS, usdcAbi, wallet);
 
           const amountUnits = ethers.parseUnits(amount.toFixed(6), 6);
           console.log(`[GameEngine] EOA Payout: ${amount} USDC from ${wallet.address} to ${to}`);
@@ -289,39 +309,29 @@ Deno.serve(async (req) => {
       console.log(`[GameEngine] Verifying deposit: ${txHash}`);
       const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
       
-      // Award credits - with retry logic for indexing delays
       let totalDeposited = 0;
-      let retries = 5;
-      
-      while (retries > 0 && totalDeposited <= 0) {
-        console.log(`[GameEngine] Checking logs for deposit... (Attempts left: ${retries})`);
-        
-        // Wait for transaction to be confirmed
-        const tx = await provider.getTransaction(txHash);
-        if (tx) {
-          const receipt = await tx.wait();
-          if (receipt.status === 1) {
-            const logs = receipt.logs.filter(l => l.address.toLowerCase() === usdcAddress.toLowerCase());
-            const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
-            
-            for (const log of logs) {
-              try {
-                const parsed = iface.parseLog(log);
-                if (parsed.name === 'Transfer' && parsed.args.to.toLowerCase() === PRIMARY_WALLET.toLowerCase()) {
-                  totalDeposited += Number(parsed.args.value) / 1e6;
-                }
-              } catch (e) {}
-            }
+      const tx = await provider.getTransaction(txHash);
+      if (tx) {
+        const receipt = await tx.wait();
+        if (receipt.status === 1) {
+          const logs = receipt.logs.filter(l => 
+            l.address.toLowerCase() === USDC_ADDRESS.toLowerCase() || 
+            l.address.toLowerCase() === USDC_E_ADDRESS.toLowerCase()
+          );
+          const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
+          
+          for (const log of logs) {
+            try {
+              const parsed = iface.parseLog(log);
+              if (parsed.name === 'Transfer' && parsed.args.to.toLowerCase() === PRIMARY_WALLET.toLowerCase()) {
+                totalDeposited += Number(parsed.args.value) / 1e6;
+              }
+            } catch (e) {}
           }
-        }
-        
-        if (totalDeposited <= 0) {
-          retries--;
-          if (retries > 0) await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
 
-      if (totalDeposited <= 0) throw new Error('No USDC transfer to Treasury detected yet. If your transaction was successful, your balance will sync automatically in a moment.');
+      if (totalDeposited <= 0) throw new Error('not detected yet');
 
       // Award credits
       const { data: profile } = await supabaseClient.from('profiles').select('balance, total_injected').eq('id', userId).single();
@@ -350,7 +360,7 @@ Deno.serve(async (req) => {
       if (profileError) throw profileError;
 
       const earnings = Number(sessionEarnings) || 0;
-      const buyIn = 0.10;
+      const buyIn = 0.25;
       const netPnl = Math.max(0, earnings - buyIn);
       
       // Redistribution Math (50% penalty on PROFIT only)
