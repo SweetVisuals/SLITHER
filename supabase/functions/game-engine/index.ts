@@ -310,47 +310,58 @@ Deno.serve(async (req) => {
       const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
       
       let totalDeposited = 0;
-      let tx = null;
-      let retries = 10;
+      let receipt = null;
+      let retries = 15; // Increased retries for slow bundlers
       
-      // Retry loop for getTransaction - useful for both slow RPCs and UserOps that just got bundled
-      while (retries > 0 && !tx) {
+      // Retry loop for receipt - direct and robust
+      while (retries > 0 && !receipt) {
         try {
-          tx = await provider.getTransaction(txHash);
-          if (!tx) {
-            console.log(`[GameEngine] Transaction ${txHash} not found yet. Retrying... (${retries} left)`);
+          receipt = await provider.getTransactionReceipt(txHash);
+          if (!receipt) {
+            console.log(`[GameEngine] Receipt for ${txHash} not found yet. Retrying... (${retries} left)`);
             retries--;
             if (retries > 0) await new Promise(resolve => setTimeout(resolve, 3000));
           }
         } catch (e) {
-          console.warn(`[GameEngine] Error fetching tx ${txHash}:`, e.message);
+          console.warn(`[GameEngine] Error fetching receipt ${txHash}:`, e.message);
           retries--;
           await new Promise(resolve => setTimeout(resolve, 3000));
         }
       }
 
-      if (tx) {
-        const receipt = await tx.wait();
-        if (receipt && receipt.status === 1) {
-          const logs = receipt.logs.filter(l => 
-            l.address.toLowerCase() === USDC_ADDRESS.toLowerCase() || 
-            l.address.toLowerCase() === USDC_E_ADDRESS.toLowerCase()
-          );
-          const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
-          
-          for (const log of logs) {
-            try {
-              const parsed = iface.parseLog(log);
-              if (parsed && parsed.name === 'Transfer' && parsed.args.to.toLowerCase() === PRIMARY_WALLET.toLowerCase()) {
-                const val = Number(parsed.args.value) / 1e6;
-                console.log(`[GameEngine] Found Transfer of ${val} USDC to Treasury`);
-                totalDeposited += val;
+      if (receipt && receipt.status === 1) {
+        console.log(`[GameEngine] Found receipt with ${receipt.logs.length} logs`);
+        const relevantLogs = receipt.logs.filter(l => 
+          l.address.toLowerCase() === USDC_ADDRESS.toLowerCase() || 
+          l.address.toLowerCase() === USDC_E_ADDRESS.toLowerCase()
+        );
+        console.log(`[GameEngine] Found ${relevantLogs.length} relevant USDC logs`);
+
+        const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
+        
+        for (const log of relevantLogs) {
+          try {
+            const parsed = iface.parseLog(log);
+            if (parsed && parsed.name === 'Transfer') {
+              const toAddress = parsed.args.to.toLowerCase();
+              const fromAddress = parsed.args.from.toLowerCase();
+              const value = parsed.args.value;
+              const valNum = Number(value) / 1e6;
+              
+              console.log(`[GameEngine] Log detail: From ${fromAddress} To ${toAddress} Val ${valNum}`);
+              
+              if (toAddress === PRIMARY_WALLET.toLowerCase()) {
+                console.log(`[GameEngine] MATCH! Valid deposit of ${valNum} USDC to treasury detected`);
+                totalDeposited += valNum;
               }
-            } catch (e) {}
+            }
+          } catch (e) {
+            console.warn(`[GameEngine] Failed to parse log:`, e.message);
           }
-        } else {
-          console.error(`[GameEngine] Transaction failed or status not 1: ${txHash}`);
         }
+      } else if (receipt && receipt.status !== 1) {
+        console.error(`[GameEngine] Transaction REVERTED on chain: ${txHash}`);
+        throw new Error('transaction reverted');
       }
 
       if (totalDeposited <= 0) {
@@ -359,15 +370,35 @@ Deno.serve(async (req) => {
       }
 
       // Award credits
-      const { data: profile } = await supabaseClient.from('profiles').select('balance, total_injected').eq('id', userId).single();
-      const newBal = (Number(profile?.balance) || 0) + totalDeposited;
-      const newInjected = (Number(profile?.total_injected) || 0) + totalDeposited;
+      console.log(`[GameEngine] Awarding ${totalDeposited} credits to user ${userId}`);
+      const { data: profile, error: fetchError } = await supabaseClient
+        .from('profiles')
+        .select('balance, total_injected')
+        .eq('id', userId)
+        .single();
       
-      await supabaseClient.from('profiles').update({ 
-        balance: newBal, 
-        total_injected: newInjected 
-      }).eq('id', userId);
+      if (fetchError || !profile) {
+        console.error(`[GameEngine] Profile not found for ${userId}. Error:`, fetchError?.message);
+        throw new Error('profile not found');
+      }
 
+      const newBal = (Number(profile.balance) || 0) + totalDeposited;
+      const newInjected = (Number(profile.total_injected) || 0) + totalDeposited;
+      
+      const { error: updateError, count } = await supabaseClient
+        .from('profiles')
+        .update({ 
+          balance: newBal, 
+          total_injected: newInjected 
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        console.error(`[GameEngine] DB Update failed for ${userId}:`, updateError.message);
+        throw new Error('database update failed');
+      }
+
+      console.log(`[GameEngine] Success! New balance for ${userId}: ${newBal}`);
       return new Response(JSON.stringify({ success: true, added: totalDeposited, newBalance: newBal }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -412,15 +443,19 @@ Deno.serve(async (req) => {
 
       console.log(`[GameEngine] DIE: Wager ${buyIn}, Earnings ${earnings}, Worth ${sessionWorth}, Penalty ${penalty}, New Balance ${newBalance}`);
 
-      await supabaseClient
+      const { error: updateError } = await supabaseClient
         .from('profiles')
         .update({ 
           balance: newBalance
         })
         .eq('id', userId);
 
+      if (updateError) {
+        console.error(`[GameEngine] DIE Balance update failed:`, updateError.message);
+      }
+
       if (sessionRes.data) {
-        await supabaseClient
+        const { error: sessionUpdateError } = await supabaseClient
           .from('sessions')
           .update({ 
               status: 'finished', 
@@ -428,6 +463,10 @@ Deno.serve(async (req) => {
               collected_money: earnings
           })
           .eq('id', sessionRes.data.id);
+        
+        if (sessionUpdateError) {
+          console.error(`[GameEngine] DIE Session update failed:`, sessionUpdateError.message);
+        }
       }
 
       // 5. Handle redistribution drops - Persist to database

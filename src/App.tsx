@@ -217,18 +217,27 @@ export default function App() {
             
             notify('Bundling transaction...', 'info');
             let receipt = null;
-            while (!receipt) {
+            let pollingAttempts = 0;
+            while (!receipt && pollingAttempts < 30) {
               try {
+                console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
                 receipt = await (provider as any).request({ method: 'eth_getUserOperationReceipt', params: [userOpHash] });
                 if (receipt?.transactionHash) {
                   txHash = receipt.transactionHash;
+                  console.log(`[TopUp] Found Transaction Hash: ${txHash}`);
+                  notify('UserOp bundled! Syncing with blockchain...', 'info');
                 } else {
+                  pollingAttempts++;
+                  if (pollingAttempts % 5 === 0) notify(`Bundling transaction... (${pollingAttempts}/30)`, 'info');
                   await new Promise(r => setTimeout(r, 2000));
                 }
               } catch (e) {
+                console.warn('[TopUp] Receipt poll error:', e);
                 await new Promise(r => setTimeout(r, 2000));
               }
             }
+
+            if (!txHash) throw new Error('Timed out waiting for transaction hash. Please check your wallet history.');
           } else if (feeQuotes.tokenPaymaster?.feeQuotes?.length) {
             const quotes = feeQuotes.tokenPaymaster.feeQuotes;
             const balanceChecks = await Promise.all(quotes.map(async (q: any) => {
@@ -268,18 +277,27 @@ export default function App() {
 
             notify('Bundling transaction...', 'info');
             let receipt = null;
-            while (!receipt) {
+            let pollingAttempts = 0;
+            while (!receipt && pollingAttempts < 45) {
               try {
+                console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
                 receipt = await (provider as any).request({ method: 'eth_getUserOperationReceipt', params: [userOpHash] });
                 if (receipt?.transactionHash) {
                   txHash = receipt.transactionHash;
+                  console.log(`[TopUp] Found Transaction Hash: ${txHash}`);
+                  notify('UserOp bundled! Syncing with blockchain...', 'info');
                 } else {
+                  pollingAttempts++;
+                  if (pollingAttempts % 5 === 0) notify(`Bundling transaction... (${pollingAttempts}/45)`, 'info');
                   await new Promise(r => setTimeout(r, 2000));
                 }
               } catch (e) {
+                console.warn('[TopUp] Receipt poll error:', e);
                 await new Promise(r => setTimeout(r, 2000));
               }
             }
+
+            if (!txHash) throw new Error('Timed out waiting for transaction hash. Please check your wallet history.');
           } else {
             let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
             finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
@@ -287,18 +305,27 @@ export default function App() {
             
             notify('Bundling transaction...', 'info');
             let receipt = null;
-            while (!receipt) {
+            let pollingAttempts = 0;
+            while (!receipt && pollingAttempts < 45) {
               try {
+                console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
                 receipt = await (provider as any).request({ method: 'eth_getUserOperationReceipt', params: [userOpHash] });
                 if (receipt?.transactionHash) {
                   txHash = receipt.transactionHash;
+                  console.log(`[TopUp] Found Transaction Hash: ${txHash}`);
+                  notify('UserOp bundled! Syncing with blockchain...', 'info');
                 } else {
+                  pollingAttempts++;
+                  if (pollingAttempts % 5 === 0) notify(`Bundling transaction... (${pollingAttempts}/45)`, 'info');
                   await new Promise(r => setTimeout(r, 2000));
                 }
               } catch (e) {
+                console.warn('[TopUp] Receipt poll error:', e);
                 await new Promise(r => setTimeout(r, 2000));
               }
             }
+
+            if (!txHash) throw new Error('Timed out waiting for transaction hash. Please check your wallet history.');
           }
         } else {
         const browserProvider = new ethers.BrowserProvider(provider as any);
