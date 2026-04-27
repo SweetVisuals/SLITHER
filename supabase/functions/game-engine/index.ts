@@ -376,27 +376,41 @@ Deno.serve(async (req) => {
     if (action === 'DIE') {
       const { x, y, sessionEarnings } = payload;
       
-      const { data: profile, error: profileError } = await supabaseClient
-        .from('profiles')
-        .select('balance')
-        .eq('id', userId)
-        .single();
+      // 1. Fetch active session and profile simultaneously for efficiency
+      const [sessionRes, profileRes] = await Promise.all([
+        supabaseClient
+          .from('sessions')
+          .select('id, buy_in')
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single(),
+        supabaseClient
+          .from('profiles')
+          .select('balance')
+          .eq('id', userId)
+          .single()
+      ]);
         
-      if (profileError) throw profileError;
+      if (profileRes.error) throw profileRes.error;
 
       const earnings = Number(sessionEarnings) || 0;
+      const buyIn = Number(sessionRes.data?.buy_in) || 0;
       
-      // Calculate 50% penalty and drop value
-      // We take 50% of the total earnings from this session
-      const penalty = earnings * 0.50;
-      const totalToDrop = earnings * 0.50;
+      // 2. Calculate Session Worth (What the player "has" in the game)
+      // Wager (already deducted) + Earnings (already added)
+      const sessionWorth = buyIn + earnings;
       
-      // The user already has the full earnings in their balance (added via COLLECT)
-      // So we deduct the penalty now.
-      const currentBalance = Number(profile.balance) || 0;
+      // 3. Penalty is 50% of the session worth
+      const penalty = sessionWorth * 0.50;
+      const totalToDrop = sessionWorth * 0.50;
+      
+      // 4. Update Profile Balance
+      const currentBalance = Number(profileRes.data.balance) || 0;
       const newBalance = Math.max(0, currentBalance - penalty);
 
-      console.log(`[GameEngine] DIE: Session Earnings ${earnings}, Penalty ${penalty}, Dropping ${totalToDrop}, New Balance ${newBalance}`);
+      console.log(`[GameEngine] DIE: Wager ${buyIn}, Earnings ${earnings}, Worth ${sessionWorth}, Penalty ${penalty}, New Balance ${newBalance}`);
 
       await supabaseClient
         .from('profiles')
@@ -405,26 +419,26 @@ Deno.serve(async (req) => {
         })
         .eq('id', userId);
 
-      await supabaseClient
-        .from('sessions')
-        .update({ 
-            status: 'finished', 
-            finished_at: new Date().toISOString(),
-            collected_money: earnings
-        })
-        .eq('user_id', userId)
-        .eq('status', 'active');
+      if (sessionRes.data) {
+        await supabaseClient
+          .from('sessions')
+          .update({ 
+              status: 'finished', 
+              finished_at: new Date().toISOString(),
+              collected_money: earnings
+          })
+          .eq('id', sessionRes.data.id);
+      }
 
-      // Handle redistribution drops - Persist to database for all players to see
+      // 5. Handle redistribution drops - Persist to database
       if (totalToDrop > 0) {
         const drops = [];
-        // Create multiple smaller drops for a better visual effect
-        const dropCount = Math.min(10, Math.max(1, Math.floor(totalToDrop / 0.05))); 
+        const dropCount = Math.min(12, Math.max(1, Math.floor(totalToDrop / 0.05))); 
         const valuePerDrop = totalToDrop / dropCount;
 
         for (let i = 0; i < dropCount; i++) {
-          const offsetX = (Math.random() - 0.5) * 150;
-          const offsetY = (Math.random() - 0.5) * 150;
+          const offsetX = (Math.random() - 0.5) * 160;
+          const offsetY = (Math.random() - 0.5) * 160;
           drops.push({
             money_value: valuePerDrop,
             x: Math.max(50, Math.min(3950, x + offsetX)),
@@ -433,9 +447,8 @@ Deno.serve(async (req) => {
           });
         }
         
-        console.log(`[GameEngine] Inserting ${drops.length} drops for a total of $${totalToDrop}`);
-        const { error: dropError } = await supabaseClient.from('drops').insert(drops);
-        if (dropError) console.error('[GameEngine] Failed to insert drops:', dropError.message);
+        console.log(`[GameEngine] Inserting ${drops.length} drops for total $${totalToDrop}`);
+        await supabaseClient.from('drops').insert(drops);
       }
 
       return new Response(JSON.stringify({ 
