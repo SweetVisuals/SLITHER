@@ -385,22 +385,18 @@ Deno.serve(async (req) => {
       if (profileError) throw profileError;
 
       const earnings = Number(sessionEarnings) || 0;
-      const buyIn = 0.25;
-      const netPnl = Math.max(0, earnings - buyIn);
       
-      // Redistribution Math (50% penalty on PROFIT only)
-      const penalty = netPnl * 0.50;
-      const totalToDrop = netPnl * 0.40;
-      const houseRake = netPnl * 0.05;
-      const foodPool = netPnl * 0.05;
-
-      // Since earnings were already added via COLLECT during the game,
-      // we only need to DEDUCT the penalty and rake at the end.
+      // Calculate 50% penalty and drop value
+      // We take 50% of the total earnings from this session
+      const penalty = earnings * 0.50;
+      const totalToDrop = earnings * 0.50;
+      
+      // The user already has the full earnings in their balance (added via COLLECT)
+      // So we deduct the penalty now.
       const currentBalance = Number(profile.balance) || 0;
-      const totalDeduction = penalty; // Rake is usually included in the penalty/distribution pool
-      const newBalance = Math.max(0, currentBalance - totalDeduction);
+      const newBalance = Math.max(0, currentBalance - penalty);
 
-      console.log(`[GameEngine] DIE: Earnings ${earnings}, Penalty to Deduct ${penalty}, New Balance ${newBalance}`);
+      console.log(`[GameEngine] DIE: Session Earnings ${earnings}, Penalty ${penalty}, Dropping ${totalToDrop}, New Balance ${newBalance}`);
 
       await supabaseClient
         .from('profiles')
@@ -419,23 +415,27 @@ Deno.serve(async (req) => {
         .eq('user_id', userId)
         .eq('status', 'active');
 
-      // Handle redistribution drops
+      // Handle redistribution drops - Persist to database for all players to see
       if (totalToDrop > 0) {
         const drops = [];
-        const dropCount = Math.min(15, Math.max(1, Math.floor(totalToDrop / 0.02))); 
+        // Create multiple smaller drops for a better visual effect
+        const dropCount = Math.min(10, Math.max(1, Math.floor(totalToDrop / 0.05))); 
         const valuePerDrop = totalToDrop / dropCount;
 
         for (let i = 0; i < dropCount; i++) {
-          const offsetX = (Math.random() - 0.5) * 200;
-          const offsetY = (Math.random() - 0.5) * 200;
+          const offsetX = (Math.random() - 0.5) * 150;
+          const offsetY = (Math.random() - 0.5) * 150;
           drops.push({
             money_value: valuePerDrop,
-            x: x + offsetX,
-            y: y + offsetY,
+            x: Math.max(50, Math.min(3950, x + offsetX)),
+            y: Math.max(50, Math.min(3950, y + offsetY)),
             created_by: userId
           });
         }
-        await supabaseClient.from('drops').insert(drops);
+        
+        console.log(`[GameEngine] Inserting ${drops.length} drops for a total of $${totalToDrop}`);
+        const { error: dropError } = await supabaseClient.from('drops').insert(drops);
+        if (dropError) console.error('[GameEngine] Failed to insert drops:', dropError.message);
       }
 
       return new Response(JSON.stringify({ 
