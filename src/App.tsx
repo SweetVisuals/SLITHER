@@ -100,7 +100,19 @@ export default function App() {
     const initAA = async () => {
       aaInitializing = true;
       try {
-        const smartAccount = new SmartAccount(provider, {
+        const forcedProvider = new Proxy(provider as any, {
+          get(target, prop) {
+            if (prop === 'request') {
+              return async (args: any) => {
+                if (args?.method === 'eth_chainId') return '0xa4b1';
+                return target.request(args);
+              };
+            }
+            return (target as any)[prop];
+          }
+        });
+
+        const smartAccount = new SmartAccount(forcedProvider as any, {
           projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
           clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
           appId: import.meta.env.VITE_PARTICLE_APP_ID,
@@ -169,7 +181,19 @@ export default function App() {
           const targetVersion = targetType.toLowerCase().includes('v1') ? '1.0.0' : '2.0.0';
           const targetName = targetType.toLowerCase().includes('biconomy') ? 'BICONOMY' : 'SIMPLE';
           
-          saInstance = new SmartAccount(provider as any, {
+          const forcedProvider = new Proxy(provider as any, {
+            get(target, prop) {
+              if (prop === 'request') {
+                return async (args: any) => {
+                  if (args?.method === 'eth_chainId') return '0xa4b1';
+                  return target.request(args);
+                };
+              }
+              return (target as any)[prop];
+            }
+          });
+
+          saInstance = new SmartAccount(forcedProvider as any, {
             projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
             clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
             appId: import.meta.env.VITE_PARTICLE_APP_ID,
