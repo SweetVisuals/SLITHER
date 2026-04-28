@@ -682,20 +682,15 @@ export default function App() {
         finalInjected = 0;
       }
 
-      // Prioritize Biconomy Smart Accounts (V2 > V1) for the Operator Node
-      const biconomyAddr = aaExtras?.biconomyAddress || (userInfo as any).biconomyV2Address || (userInfo as any).biconomyV1Address;
-      const otherSmartAddr = aaExtras?.simpleAddress || (userInfo as any).simpleV2Address;
+      // Strictly prioritize Biconomy Smart Accounts (V2 > V1) for the Operator Node
+      const biconomyAddr = (aaExtras?.biconomyAddress || (userInfo as any).biconomyV2Address || (userInfo as any).biconomyV1Address || '').toLowerCase();
       
-      let primaryAddr = biconomyAddr || otherSmartAddr || forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
-      
-      // If we found a Biconomy smart account, force it as the primary "Operator Node"
-      if (biconomyAddr) {
-        primaryAddr = biconomyAddr;
-      }
-      
-      if (primaryAddr && (!userAddress || userAddress.toLowerCase() !== primaryAddr.toLowerCase())) {
-        console.log('[Diagnostic] Setting primary Biconomy node:', primaryAddr);
-        setUserAddress(primaryAddr);
+      // If we have a Biconomy address, it MUST be the primary Operator Node
+      if (biconomyAddr && biconomyAddr.length > 20) {
+        if (userAddress.toLowerCase() !== biconomyAddr) {
+          console.log('[Diagnostic] Forcing primary Biconomy node:', biconomyAddr);
+          setUserAddress(biconomyAddr);
+        }
       }
 
       if (data) {
@@ -820,17 +815,14 @@ export default function App() {
         }
       }
       
-      // Strict Priority: Biconomy V2 -> Biconomy V1 -> Simple -> Fallback (only if no AA found)
-      const primaryBiconomy = biconomyAddress || (userInfo as any).biconomyV1Address;
-      const primarySimple = simpleAddress || (userInfo as any).simpleV2Address;
+      // Strict Priority: Biconomy V2 -> Biconomy V1
+      const finalAddress = (biconomyAddress || (userInfo as any).biconomyV1Address || '').toLowerCase();
       
-      const finalAddress = primaryBiconomy || primarySimple || ethAddress || userInfo.wallets?.[0]?.public_address;
+      console.log('[Diagnostic] Final Biconomy Node Selected:', finalAddress);
       
-      console.log('[Diagnostic] Final Primary Node Selected:', finalAddress);
-      
-      if (finalAddress) {
+      if (finalAddress && finalAddress.length > 20) {
         setUserAddress(finalAddress);
-        fetchUserData(finalAddress, 0, { biconomyAddress: primaryBiconomy, simpleAddress: primarySimple });
+        fetchUserData(finalAddress, 0, { biconomyAddress: biconomyAddress, simpleAddress: simpleAddress });
       } else if (!userProfile && userInfo?.uuid) {
         fetchUserData();
       }
@@ -1853,7 +1845,7 @@ export default function App() {
                     <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest font-bold">Operator Node</p>
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm font-bold text-white font-mono truncate">
-                        {userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'Disconnected'}
+                        {userAddress ? `${userAddress.toLowerCase().slice(0, 6)}...${userAddress.toLowerCase().slice(-4)}` : 'Disconnected'}
                       </span>
                       <button 
                         onClick={() => {
@@ -1998,7 +1990,7 @@ export default function App() {
                     <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest text-center">Your Deposit Address (ARBITRUM)</p>
                     <div className="flex items-center justify-center gap-3">
                       <span className="text-xs font-bold text-sky-400 font-mono break-all text-center">
-                        {userAddress}
+                        {userAddress?.toLowerCase()}
                       </span>
                       <button 
                         onClick={() => {
