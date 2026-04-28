@@ -111,6 +111,7 @@ export default function App() {
             }
           }
         });
+        (smartAccount as any).setChain(42161);
         smartAccountRef.current = smartAccount;
         console.log('[AA] Smart Account initialized successfully');
       } catch (err) {
@@ -181,6 +182,7 @@ export default function App() {
               }
             }
           });
+          (saInstance as any).setChain(42161);
           activeAddress = await saInstance.getAddress();
           console.log(`[TopUp] Initialized temporary ${targetType} instance at ${activeAddress}`);
         }
