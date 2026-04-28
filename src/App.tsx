@@ -570,16 +570,8 @@ export default function App() {
 
   const isAdmin = useMemo(() => {
     const email = userInfo?.email?.toLowerCase() || '';
-    const addr = userAddress?.toLowerCase() || '';
-    const treasury = PRIMARY_WALLET.toLowerCase();
-    
-    return (
-      email === 'ptnmgmt@gmail.com' || 
-      email === 'nicolastheato@gmail.com' ||
-      addr === treasury ||
-      (userInfo as any)?.public_address?.toLowerCase() === treasury
-    );
-  }, [userInfo, userAddress, PRIMARY_WALLET]);
+    return email === 'ptnmgmt@gmail.com';
+  }, [userInfo]);
   
   const handleLogout = async () => {
     try {
@@ -707,7 +699,10 @@ export default function App() {
         }
       };
 
-      if (PRIMARY_WALLET) addAddr(PRIMARY_WALLET);
+      // ONLY add treasury to scan if admin
+      if (PRIMARY_WALLET && userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com') {
+        addAddr(PRIMARY_WALLET);
+      }
       if (forcedAddress) addAddr(forcedAddress);
       if (userAddress) addAddr(userAddress);
       if (ethAddress) addAddr(ethAddress);
