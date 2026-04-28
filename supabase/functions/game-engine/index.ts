@@ -310,72 +310,63 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'DEPOSIT') {
-      const { txHash } = payload;
+      const { txHash, amount: providedAmount } = payload;
       if (!txHash) throw new Error('No transaction hash provided');
 
-      console.log(`[GameEngine] Verifying deposit: ${txHash} for user ${userId}`);
-      const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
+      let totalDeposited = Number(providedAmount) || 0;
       
-      let totalDeposited = 0;
-      let receipt = null;
-      let retries = 15; // Increased retries for slow bundlers
-      
-      // Robust receipt polling with a short delay for indexing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      while (retries > 0 && !receipt) {
-        try {
-          receipt = await provider.getTransactionReceipt(txHash);
-          if (!receipt) {
-            console.log(`[GameEngine] Receipt for ${txHash} not found yet. Retrying... (${retries} left)`);
-            retries--;
-            if (retries > 0) await new Promise(resolve => setTimeout(resolve, 4000));
-          }
-        } catch (e: any) {
-          console.warn(`[GameEngine] Error fetching receipt ${txHash}:`, e.message);
-          retries--;
-          await new Promise(resolve => setTimeout(resolve, 4000));
-        }
-      }
-
-      if (receipt && receipt.status === 1) {
-        console.log(`[GameEngine] Found receipt with ${receipt.logs.length} logs`);
-        const relevantLogs = receipt.logs.filter(l => 
-          l.address.toLowerCase() === USDC_ADDRESS.toLowerCase() || 
-          l.address.toLowerCase() === USDC_E_ADDRESS.toLowerCase()
-        );
-        console.log(`[GameEngine] Found ${relevantLogs.length} relevant USDC logs`);
-
-        const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
+      // If amount is provided, we trust it for instant credit as requested
+      if (totalDeposited > 0) {
+        console.log(`[GameEngine] Instant credit requested: ${totalDeposited} for user ${userId} (TX: ${txHash})`);
+      } else {
+        console.log(`[GameEngine] Verifying deposit: ${txHash} for user ${userId}`);
+        const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
         
-        for (const log of relevantLogs) {
+        let receipt = null;
+        let retries = 15;
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        while (retries > 0 && !receipt) {
           try {
-            const parsed = iface.parseLog(log);
-            if (parsed && parsed.name === 'Transfer') {
-              const toAddress = parsed.args.to.toLowerCase();
-              const fromAddress = parsed.args.from.toLowerCase();
-              const value = parsed.args.value;
-              const valNum = Number(value) / 1e6;
-              
-              console.log(`[GameEngine] Log detail: From ${fromAddress} To ${toAddress} Val ${valNum}`);
-              
-              if (toAddress === PRIMARY_WALLET.toLowerCase()) {
-                console.log(`[GameEngine] MATCH! Valid deposit of ${valNum} USDC to treasury detected`);
-                totalDeposited += valNum;
-              }
+            receipt = await provider.getTransactionReceipt(txHash);
+            if (!receipt) {
+              console.log(`[GameEngine] Receipt for ${txHash} not found yet. Retrying... (${retries} left)`);
+              retries--;
+              if (retries > 0) await new Promise(resolve => setTimeout(resolve, 4000));
             }
-          } catch (e) {
-            console.warn(`[GameEngine] Failed to parse log:`, e.message);
+          } catch (e: any) {
+            console.warn(`[GameEngine] Error fetching receipt ${txHash}:`, e.message);
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, 4000));
           }
         }
-      } else if (receipt && receipt.status !== 1) {
-        console.error(`[GameEngine] Transaction REVERTED on chain: ${txHash}`);
-        throw new Error('transaction reverted');
-      }
 
-      if (totalDeposited <= 0) {
-        console.warn(`[GameEngine] Deposit verification failed for ${txHash}. Total detected: ${totalDeposited}`);
-        throw new Error('not detected yet');
+        if (receipt && receipt.status === 1) {
+          const relevantLogs = receipt.logs.filter(l => 
+            l.address.toLowerCase() === USDC_ADDRESS.toLowerCase() || 
+            l.address.toLowerCase() === USDC_E_ADDRESS.toLowerCase()
+          );
+          const iface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
+          
+          for (const log of relevantLogs) {
+            try {
+              const parsed = iface.parseLog(log);
+              if (parsed && parsed.name === 'Transfer') {
+                const toAddress = parsed.args.to.toLowerCase();
+                const value = parsed.args.value;
+                const valNum = Number(value) / 1e6;
+                if (toAddress === PRIMARY_WALLET.toLowerCase()) {
+                  totalDeposited += valNum;
+                }
+              }
+            } catch (e) {}
+          }
+        } else if (receipt && receipt.status !== 1) {
+          throw new Error('transaction reverted');
+        }
+
+        if (totalDeposited <= 0) throw new Error('not detected yet');
       }
 
       // Award credits

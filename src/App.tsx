@@ -341,6 +341,24 @@ export default function App() {
               console.log('[TopUp] Bundling timed out, but transaction might still confirm. Attempting to use UserOpHash as fallback.');
               txHash = userOpHash; // Fallback to UserOpHash if we can't get TxHash - backend will try to resolve it
             }
+
+            // INSTANT CREDIT: Call backend immediately with the amount
+            try {
+              const { data: { session: authSession } } = await supabase.auth.getSession();
+              fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash, amount: finalAmount } })
+              });
+              // We don't await here because we want the UI to be responsive
+              // The backend will award credits immediately
+              setTimeout(fetchUserData, 1000); 
+            } catch (e) {
+              console.error('[TopUp] Instant credit trigger failed:', e);
+            }
           } else {
             let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
             finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
@@ -388,6 +406,20 @@ export default function App() {
               console.log('[TopUp] Bundling timed out, but transaction might still confirm. Attempting to use UserOpHash as fallback.');
               txHash = userOpHash;
             }
+
+            // INSTANT CREDIT: Call backend immediately
+            try {
+              const { data: { session: authSession } } = await supabase.auth.getSession();
+              fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash, amount: finalAmount } })
+              });
+              setTimeout(fetchUserData, 1000);
+            } catch (e) {}
           }
         } else {
         const browserProvider = new ethers.BrowserProvider(provider as any);
@@ -411,9 +443,21 @@ export default function App() {
         notify(`Requesting signature for $${finalAmount.toFixed(2)}...`, 'info');
         try {
           const tx = await usdcContract.transfer(PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6));
-          const receipt = await tx.wait();
-          if (!receipt || receipt.status !== 1) throw new Error('Transaction failed');
+          // tx is the TransactionResponse, it has the hash immediately
           txHash = tx.hash;
+          notify('Transaction sent! Triggering instant credit...', 'info');
+
+          // INSTANT CREDIT: Call backend immediately
+          const { data: { session: authSession } } = await supabase.auth.getSession();
+          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash, amount: finalAmount } })
+          });
+          setTimeout(fetchUserData, 1000);
         } catch (txErr: any) {
           if (txErr.message?.toLowerCase().includes('estimategas') || txErr.code === 'INSUFFICIENT_FUNDS') {
             throw new Error(`Gas estimation failed. This standard wallet requires ETH to pay for gas. Please use a Smart Account for a gassless experience.`);
@@ -1888,6 +1932,10 @@ export default function App() {
                   <div className="space-y-4">
                     {(() => {
                       const filtered = detectedAddresses.filter(d => {
+                        const isTreasury = d.type === 'House Treasury';
+                        // Filter out treasury for non-admins
+                        if (isTreasury && !isAdmin) return false;
+
                         const isBiconomy = d.type.toLowerCase().includes('biconomy');
                         const isOperatorNode = d.address.toLowerCase() === userAddress.toLowerCase();
                         const hasBalance = (d.bal || 0) > 0 || (d.nativeBal || 0) > 0 || (d.bridgedBal || 0) > 0;
