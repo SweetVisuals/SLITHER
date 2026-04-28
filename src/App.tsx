@@ -683,10 +683,17 @@ export default function App() {
       }
 
       // Prioritize Smart Accounts (Biconomy > Simple) over EOAs
+      // Use the best detected wallet if it's a smart account to ensure "Operator Node" matches "Top Up" options
       const smartAddr = aaExtras?.biconomyAddress || (userInfo as any).biconomyV2Address || aaExtras?.simpleAddress || (userInfo as any).biconomyV1Address || (userInfo as any).simpleV2Address;
-      const primaryAddr = smartAddr || forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
       
-      if (primaryAddr && (!userAddress || userAddress !== primaryAddr)) {
+      let primaryAddr = smartAddr || forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
+      
+      // If we found a "best" wallet that is a smart account, use it as primary to avoid mismatch
+      if (best && best.priority >= 1000) {
+        primaryAddr = best.addr;
+      }
+      
+      if (primaryAddr && (!userAddress || userAddress.toLowerCase() !== primaryAddr.toLowerCase())) {
         console.log('[Diagnostic] Setting primary address to:', primaryAddr);
         setUserAddress(primaryAddr);
       }
@@ -1789,15 +1796,13 @@ export default function App() {
                       const isBiconomyV1 = d.type === 'Biconomy V1';
                       const hasBalance = d.bal > 0 || d.nativeBal > 0 || d.bridgedBal > 0;
                       const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
+                      const isOperatorNode = d.address.toLowerCase() === userAddress.toLowerCase();
+                      const isSpecialUser = userInfo?.email?.toLowerCase() === 'nicolastheato@gmail.com';
                       
                       // Show if it has balance OR if it's the specific Biconomy V1 node (even if 0)
-                      // House Treasury is now always hidden from this list
-                      return (hasBalance || isBiconomyV1) && isSmart;
-                    }).length > 0 ? detectedAddresses.filter(d => {
-                      const isBiconomyV1 = d.type === 'Biconomy V1';
-                      const hasBalance = d.bal > 0 || d.nativeBal > 0 || d.bridgedBal > 0;
-                      const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
-                      return (hasBalance || isBiconomyV1) && isSmart;
+                      // ALWAYS show the current Operator Node if it's a smart account to prevent address mismatch confusion
+                      // For nicolastheato@gmail.com, temporarily show the operator node even if not smart to allow withdrawal recovery
+                      return (hasBalance || isBiconomyV1 || isOperatorNode) && (isSmart || (isSpecialUser && isOperatorNode));
                     }).map((d, i) => (
                       <div key={i} className="space-y-3">
                         <div className="premium-glass p-6 rounded-3xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-6 hover:bg-white/[0.05] transition-all group/row">
