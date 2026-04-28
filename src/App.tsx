@@ -424,12 +424,15 @@ export default function App() {
 
 
   const isAdmin = useMemo(() => {
-    const eoaWallet = userInfo?.wallets?.find((w: any) => w.type?.toLowerCase() === 'eoa')?.public_address;
+    const email = userInfo?.email?.toLowerCase() || '';
+    const addr = userAddress?.toLowerCase() || '';
+    const treasury = PRIMARY_WALLET.toLowerCase();
+    
     return (
-      userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || 
-      userAddress?.toLowerCase() === PRIMARY_WALLET.toLowerCase() ||
-      eoaWallet?.toLowerCase() === PRIMARY_WALLET.toLowerCase() ||
-      (userInfo as any)?.public_address?.toLowerCase() === PRIMARY_WALLET.toLowerCase()
+      email === 'ptnmgmt@gmail.com' || 
+      email === 'nicolastheato@gmail.com' ||
+      addr === treasury ||
+      (userInfo as any)?.public_address?.toLowerCase() === treasury
     );
   }, [userInfo, userAddress, PRIMARY_WALLET]);
   
@@ -681,6 +684,9 @@ export default function App() {
 
       // Strictly prioritize Biconomy Smart Accounts (V2 > V1) for the Operator Node
       const biconomyAddr = (aaExtras?.biconomyAddress || (userInfo as any).biconomyV2Address || (userInfo as any).biconomyV1Address || '').toLowerCase();
+      const otherSmartAddr = aaExtras?.simpleAddress || (userInfo as any).simpleV2Address;
+      
+      const primaryAddr = biconomyAddr || otherSmartAddr || forcedAddress || userAddress || (userInfo as any).public_address;
       
       // If we have a Biconomy address, it MUST be the primary Operator Node
       if (biconomyAddr && biconomyAddr.length > 20) {
@@ -1230,9 +1236,7 @@ export default function App() {
 
             <div className="grid grid-cols-1 gap-8 mb-12">
               {/* Admin Treasury Dashboard - Check email OR specific admin wallet */}
-              {/* Admin Treasury Dashboard - Optimized for Mobile */}
-              {(userInfo?.email?.toLowerCase() === 'ptnmgmt@gmail.com' || 
-                userAddress === '0x8733E2065B72121cC9a91E5471D2cc1075D050ef') && (
+              {isAdmin && (
                 <div className="p-6 md:p-12 bg-gradient-to-br from-purple-900/40 via-slate-900/60 to-slate-950/80 rounded-[2.5rem] md:rounded-[4rem] backdrop-blur-3xl shadow-2xl relative overflow-hidden group border-none">
                   <div className="absolute -top-24 -right-24 w-96 h-96 bg-purple-500/10 rounded-full blur-[120px] group-hover:bg-purple-500/20 transition-all duration-1000" />
                   
