@@ -239,6 +239,31 @@ export default function App() {
               feeQuote: feeQuotes.verifyingPaymasterGasless.feeQuote,
             } as any);
             
+            console.log(`[TopUp] UserOp Hash: ${userOpHash}`);
+
+            // TRIGGER INSTANT CREDIT IMMEDIATELY
+            const triggerInstantCredit = async (hash: string, amt: number) => {
+              try {
+                const { data: { session: authSession } } = await supabase.auth.getSession();
+                const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                  },
+                  body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash: hash, amount: amt } })
+                });
+                const data = await res.json();
+                console.log('[TopUp] Instant credit response:', data);
+                await fetchUserData();
+              } catch (e) {
+                console.error('[TopUp] Instant credit failed:', e);
+              }
+            };
+
+            triggerInstantCredit(userOpHash, finalAmount);
+            setIsProcessing(false); // Unlock UI immediately
+
             notify('Bundling transaction...', 'info');
             let receipt = null;
             let pollingAttempts = 0;
@@ -307,7 +332,7 @@ export default function App() {
                 console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
                 
                 // Use fetch to query Particle Bundler directly since provider might not support eth_getUserOperationReceipt
-                const bundlerUrl = `https://api.particle.network/evm-chain/bundle?chainId=42161&projectUuid=${import.meta.env.VITE_PARTICLE_PROJECT_ID}&projectKey=${import.meta.env.VITE_PARTICLE_CLIENT_KEY}`;
+                const bundlerUrl = `https://api.particle.network/evm-chain/rpc?chainId=42161&projectUuid=${import.meta.env.VITE_PARTICLE_PROJECT_ID}&projectKey=${import.meta.env.VITE_PARTICLE_CLIENT_KEY}`;
                 const rpcRes = await fetch(bundlerUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -337,28 +362,7 @@ export default function App() {
               }
             }
 
-            if (!txHash) {
-              console.log('[TopUp] Bundling timed out, but transaction might still confirm. Attempting to use UserOpHash as fallback.');
-              txHash = userOpHash; // Fallback to UserOpHash if we can't get TxHash - backend will try to resolve it
-            }
-
-            // INSTANT CREDIT: Call backend immediately with the amount
-            try {
-              const { data: { session: authSession } } = await supabase.auth.getSession();
-              fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
-                },
-                body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash, amount: finalAmount } })
-              });
-              // We don't await here because we want the UI to be responsive
-              // The backend will award credits immediately
-              setTimeout(fetchUserData, 1000); 
-            } catch (e) {
-              console.error('[TopUp] Instant credit trigger failed:', e);
-            }
+            setIsProcessing(false);
           } else {
             let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
             finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
@@ -372,7 +376,7 @@ export default function App() {
                 console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
                 
                 // Use fetch to query Particle Bundler directly since provider might not support eth_getUserOperationReceipt
-                const bundlerUrl = `https://api.particle.network/evm-chain/bundle?chainId=42161&projectUuid=${import.meta.env.VITE_PARTICLE_PROJECT_ID}&projectKey=${import.meta.env.VITE_PARTICLE_CLIENT_KEY}`;
+                const bundlerUrl = `https://api.particle.network/evm-chain/rpc?chainId=42161&projectUuid=&projectKey=`;
                 const rpcRes = await fetch(bundlerUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -419,6 +423,7 @@ export default function App() {
                 body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash, amount: finalAmount } })
               });
               setTimeout(fetchUserData, 1000);
+              setIsProcessing(false); // RELEASE UI IMMEDIATELY
             } catch (e) {}
           }
         } else {
@@ -458,6 +463,7 @@ export default function App() {
             body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash, amount: finalAmount } })
           });
           setTimeout(fetchUserData, 1000);
+          setIsProcessing(false); // RELEASE UI IMMEDIATELY
         } catch (txErr: any) {
           if (txErr.message?.toLowerCase().includes('estimategas') || txErr.code === 'INSUFFICIENT_FUNDS') {
             throw new Error(`Gas estimation failed. This standard wallet requires ETH to pay for gas. Please use a Smart Account for a gassless experience.`);
