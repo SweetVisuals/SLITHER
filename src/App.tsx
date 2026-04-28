@@ -631,13 +631,16 @@ export default function App() {
         }
         
         newDetected.push({ 
-          addr, 
+          address: addr, 
           bal, 
           type, 
           nativeBal: balData.nativeBal, 
           bridgedBal: balData.bridgedBal 
         });
       }
+
+      // Update the UI state with detected wallets
+      setDetectedAddresses(newDetected);
 
       // Find the best wallet for quick top-up (Prioritize GASSLESS Smart Accounts)
       const allOptions: any[] = [];
@@ -646,8 +649,8 @@ export default function App() {
         const isSA = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
         const priority = isSA ? 1000 : 1; // Heavy priority for SA
         
-        if (d.nativeBal > 0) allOptions.push({ addr: d.addr, bal: d.nativeBal, type: d.type, token: USDC_ADDRESS, priority });
-        if (d.bridgedBal > 0) allOptions.push({ addr: d.addr, bal: d.bridgedBal, type: d.type, token: USDC_E_ADDRESS, priority });
+        if (d.nativeBal > 0) allOptions.push({ addr: d.address, bal: d.nativeBal, type: d.type, token: USDC_ADDRESS, priority });
+        if (d.bridgedBal > 0) allOptions.push({ addr: d.address, bal: d.bridgedBal, type: d.type, token: USDC_E_ADDRESS, priority });
       });
       
       // Sort by priority first, then balance
@@ -1792,12 +1795,11 @@ export default function App() {
                       return isSmart || isHouse;
                     }).map((d, i) => (
                       <div key={i} className="space-y-3">
-                        {d.nativeBal > 0 && (
-                          <div className="premium-glass p-6 rounded-3xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-6 hover:bg-white/[0.05] transition-all group/row">
-                            <div className="flex items-center gap-5">
-                              <div className="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
-                                <Zap className="w-6 h-6" />
-                              </div>
+                        <div className="premium-glass p-6 rounded-3xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-6 hover:bg-white/[0.05] transition-all group/row">
+                          <div className="flex items-center gap-5">
+                            <div className="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
+                              <Zap className="w-6 h-6" />
+                            </div>
                               <div className="min-w-0">
                                 <p className="text-base font-black text-white group-hover/row:text-sky-400 transition-colors uppercase tracking-tight">
                                   {d.type} (USDC)
@@ -1822,7 +1824,6 @@ export default function App() {
                               </button>
                             </div>
                           </div>
-                        )}
                       </div>
                     )) : (
                       <div className="text-center py-12 premium-glass rounded-[2rem] border-none">
