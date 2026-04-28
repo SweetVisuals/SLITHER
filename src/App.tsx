@@ -552,7 +552,8 @@ export default function App() {
           bridgedBal = Number(BigInt(resUSDCe)) / Math.pow(10, USDC_E_DECIMALS);
         }
 
-        return { nativeBal, bridgedBal, total: nativeBal + bridgedBal };
+        const total = (nativeBal || 0) + (bridgedBal || 0);
+        return { nativeBal, bridgedBal, total };
       };
 
       const scanSet = new Set<string>();
@@ -743,7 +744,7 @@ export default function App() {
       // Fetch treasury balance if admin
       if (isAdmin) {
         const tBal = await getBalance(PRIMARY_WALLET);
-        if (tBal !== null) setTreasuryBalance(tBal);
+        if (tBal !== null) setTreasuryBalance(tBal.total);
         
         try {
           const ethRes = await (provider as any || fetch).request?.({
@@ -1788,10 +1789,10 @@ export default function App() {
                       const filtered = detectedAddresses.filter(d => {
                         const isBiconomy = d.type.toLowerCase().includes('biconomy');
                         const isOperatorNode = d.address.toLowerCase() === userAddress.toLowerCase();
+                        const hasBalance = (d.bal || 0) > 0 || (d.nativeBal || 0) > 0 || (d.bridgedBal || 0) > 0;
                         
-                        // Show ONLY the primary Biconomy Operator Node
-                        // This ensures there is only 1 available account to deposit to and topup from
-                        return isOperatorNode && isBiconomy;
+                        // Show the primary Biconomy Operator Node OR any wallet with balance (for recovery)
+                        return (isOperatorNode && isBiconomy) || hasBalance;
                       });
 
                       if (filtered.length > 0) {
