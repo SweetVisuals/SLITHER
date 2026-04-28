@@ -388,11 +388,6 @@ export default function App() {
           }
         }
       }
-    } catch (err: any) {
-      console.error('Topup failed:', err);
-      notify(err.message || 'Top-up failed', 'error');
-      setIsProcessing(false); // Only stop on initial failure
-    }
 
       if (txHash) {
         setSyncingTxHash(txHash);
