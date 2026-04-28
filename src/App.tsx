@@ -434,23 +434,66 @@ export default function App() {
         };
 
         // Start polling with a hard limit
-        const MAX_POLL_ATTEMPTS = 15; // 75 seconds total
+        const MAX_POLL_ATTEMPTS = 60; // 5 minutes total
         const interval = setInterval(async () => {
           if (attempts >= MAX_POLL_ATTEMPTS) {
              clearInterval(interval);
              setIsProcessing(false);
              setSyncingTxHash(null);
-             notify("Sync timeout. The funds reached the treasury but the balance update is taking longer than expected. Please refresh in a minute.", "warning");
+             notify("Blockchain sync is slow. Your credits will appear automatically once confirmed. You can also click SYNC later.", "warning");
              return;
           }
           const finished = await pollDeposit();
-          if (finished) clearInterval(interval);
+          if (finished) {
+            clearInterval(interval);
+            setIsProcessing(false);
+          }
         }, 5000);
 
         // Also check once immediately
-        pollDeposit().then(finished => { if (finished) clearInterval(interval); });
+        pollDeposit();
       }
-    };
+    } catch (err: any) {
+      console.error('Topup failed:', err);
+      notify(err.message || 'Top-up failed', 'error');
+      setIsProcessing(false);
+    }
+  };
+
+  const handleGlobalSync = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      notify('Synchronizing node status...', 'info');
+      await fetchUserData();
+      
+      // If there's a pending TX hash we were tracking, try to verify it one last time
+      if (syncingTxHash) {
+        notify('Checking pending deposit...', 'info');
+        const { data: { session: authSession } } = await supabase.auth.getSession();
+        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo?.uuid, txHash: syncingTxHash } })
+        });
+        const result = await res.json();
+        if (result.success) {
+          const addedAmt = Number(result.added || 0);
+          notify(`Deposit verified! $${addedAmt.toFixed(2)} added.`, 'success');
+          setBalance(result.newBalance);
+          setSyncingTxHash(null);
+        }
+      }
+      notify('Node synchronized.', 'success');
+    } catch (err) {
+      console.error('Global sync error:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
 
 
@@ -1249,7 +1292,7 @@ export default function App() {
                   
                   {/* Action Grid - Contained and non-scrollable on mobile */}
                   <div className="grid grid-cols-2 md:flex w-full md:w-auto gap-3 md:gap-4">
-                     <button onClick={fetchUserData} className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-slate-800/60 hover:bg-slate-700 text-sky-400 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl border-none">
+                     <button onClick={handleGlobalSync} className="flex items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 bg-slate-800/60 hover:bg-slate-700 text-sky-400 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl border-none">
                         <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin' : ''}`} />
                         <span>SYNC</span>
                      </button>
