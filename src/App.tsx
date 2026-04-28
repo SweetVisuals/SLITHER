@@ -104,6 +104,7 @@ export default function App() {
           projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
           clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
           appId: import.meta.env.VITE_PARTICLE_APP_ID,
+          chainId: 42161,
           aaOptions: {
             accountContracts: {
               BICONOMY: [{ version: '2.0.0', chainIds: [42161] }]
@@ -173,6 +174,7 @@ export default function App() {
             projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
             clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
             appId: import.meta.env.VITE_PARTICLE_APP_ID,
+            chainId: 42161,
             aaOptions: {
               accountContracts: {
                 [targetName]: [{ version: targetVersion, chainIds: [42161] }]
