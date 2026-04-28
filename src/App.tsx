@@ -682,19 +682,19 @@ export default function App() {
         finalInjected = 0;
       }
 
-      // Prioritize Smart Accounts (Biconomy > Simple) over EOAs
-      // Use the best detected wallet if it's a smart account to ensure "Operator Node" matches "Top Up" options
-      const smartAddr = aaExtras?.biconomyAddress || (userInfo as any).biconomyV2Address || aaExtras?.simpleAddress || (userInfo as any).biconomyV1Address || (userInfo as any).simpleV2Address;
+      // Prioritize Biconomy Smart Accounts (V2 > V1) for the Operator Node
+      const biconomyAddr = aaExtras?.biconomyAddress || (userInfo as any).biconomyV2Address || (userInfo as any).biconomyV1Address;
+      const otherSmartAddr = aaExtras?.simpleAddress || (userInfo as any).simpleV2Address;
       
-      let primaryAddr = smartAddr || forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
+      let primaryAddr = biconomyAddr || otherSmartAddr || forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
       
-      // If we found a "best" wallet that is a smart account, use it as primary to avoid mismatch
-      if (best && best.priority >= 1000) {
-        primaryAddr = best.addr;
+      // If we found a Biconomy smart account, force it as the primary "Operator Node"
+      if (biconomyAddr) {
+        primaryAddr = biconomyAddr;
       }
       
       if (primaryAddr && (!userAddress || userAddress.toLowerCase() !== primaryAddr.toLowerCase())) {
-        console.log('[Diagnostic] Setting primary address to:', primaryAddr);
+        console.log('[Diagnostic] Setting primary Biconomy node:', primaryAddr);
         setUserAddress(primaryAddr);
       }
 
@@ -1794,15 +1794,12 @@ export default function App() {
                   <div className="space-y-4">
                     {(() => {
                       const filtered = detectedAddresses.filter(d => {
-                        const isBiconomyV1 = d.type === 'Biconomy V1';
-                        const hasBalance = d.bal > 0 || d.nativeBal > 0 || d.bridgedBal > 0;
-                        const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
+                        const isBiconomy = d.type.toLowerCase().includes('biconomy');
                         const isOperatorNode = d.address.toLowerCase() === userAddress.toLowerCase();
-                        const isSpecialUser = userInfo?.email?.toLowerCase().includes('nicolastheato');
                         
-                        // For special user (nicolastheato), allow ANY detected wallet with balance (including EOAs)
-                        // This enables recovery of funds sent to the wrong wallet type
-                        return (hasBalance || isBiconomyV1 || isOperatorNode) && (isSmart || isSpecialUser);
+                        // Show ONLY the primary Biconomy Operator Node
+                        // This ensures there is only 1 available account to deposit to and topup from
+                        return isOperatorNode && isBiconomy;
                       });
 
                       if (filtered.length > 0) {
