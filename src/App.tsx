@@ -406,25 +406,7 @@ export default function App() {
               }
             }
 
-            if (!txHash) {
-              console.log('[TopUp] Bundling timed out, but transaction might still confirm. Attempting to use UserOpHash as fallback.');
-              txHash = userOpHash;
-            }
-
-            // INSTANT CREDIT: Call backend immediately
-            try {
-              const { data: { session: authSession } } = await supabase.auth.getSession();
-              fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
-                },
-                body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash, amount: finalAmount } })
-              });
-              setTimeout(fetchUserData, 1000);
-              setIsProcessing(false); // RELEASE UI IMMEDIATELY
-            } catch (e) {}
+            setIsProcessing(false);
           }
         } else {
         const browserProvider = new ethers.BrowserProvider(provider as any);
