@@ -1792,54 +1792,59 @@ export default function App() {
                     </h4>
                   </div>
                   <div className="space-y-4">
-                    {detectedAddresses.filter(d => {
-                      const isBiconomyV1 = d.type === 'Biconomy V1';
-                      const hasBalance = d.bal > 0 || d.nativeBal > 0 || d.bridgedBal > 0;
-                      const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
-                      const isOperatorNode = d.address.toLowerCase() === userAddress.toLowerCase();
-                      const isSpecialUser = userInfo?.email?.toLowerCase() === 'nicolastheato@gmail.com';
-                      
-                      // Show if it has balance OR if it's the specific Biconomy V1 node (even if 0)
-                      // ALWAYS show the current Operator Node if it's a smart account to prevent address mismatch confusion
-                      // For nicolastheato@gmail.com, temporarily show the operator node even if not smart to allow withdrawal recovery
-                      return (hasBalance || isBiconomyV1 || isOperatorNode) && (isSmart || (isSpecialUser && isOperatorNode));
-                    }).map((d, i) => (
-                      <div key={i} className="space-y-3">
-                        <div className="premium-glass p-6 rounded-3xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-6 hover:bg-white/[0.05] transition-all group/row">
-                          <div className="flex items-center gap-5">
-                            <div className="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
-                              <Zap className="w-6 h-6" />
-                            </div>
-                              <div className="min-w-0">
-                                <p className="text-base font-black text-white group-hover/row:text-sky-400 transition-colors uppercase tracking-tight">
-                                  {d.type} (USDC)
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <p className="text-[10px] font-mono text-slate-500">{d.address.slice(0,12)}...{d.address.slice(-8)}</p>
-                                  <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 uppercase tracking-widest">GASSLESS NODE</span>
+                    {(() => {
+                      const filtered = detectedAddresses.filter(d => {
+                        const isBiconomyV1 = d.type === 'Biconomy V1';
+                        const hasBalance = d.bal > 0 || d.nativeBal > 0 || d.bridgedBal > 0;
+                        const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
+                        const isOperatorNode = d.address.toLowerCase() === userAddress.toLowerCase();
+                        const isSpecialUser = userInfo?.email?.toLowerCase() === 'nicolastheato@gmail.com';
+                        
+                        return (hasBalance || isBiconomyV1 || isOperatorNode) && (isSmart || (isSpecialUser && isOperatorNode));
+                      });
+
+                      if (filtered.length > 0) {
+                        return filtered.map((d, i) => (
+                          <div key={i} className="space-y-3">
+                            <div className="premium-glass p-6 rounded-3xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-6 hover:bg-white/[0.05] transition-all group/row">
+                              <div className="flex items-center gap-5">
+                                <div className="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
+                                  <Zap className="w-6 h-6" />
+                                </div>
+                                  <div className="min-w-0">
+                                    <p className="text-base font-black text-white group-hover/row:text-sky-400 transition-colors uppercase tracking-tight">
+                                      {d.type} (USDC)
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-[10px] font-mono text-slate-500">{d.address.slice(0,12)}...{d.address.slice(-8)}</p>
+                                      <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 uppercase tracking-widest">GASSLESS NODE</span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-6">
+                                  <div className="text-right">
+                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Available</p>
+                                    <p className="text-2xl font-black text-white italic tracking-tighter">${d.nativeBal.toFixed(2)}</p>
+                                  </div>
+                                  <button 
+                                    onClick={() => handleTopUp(d.nativeBal, d.type, d.address, USDC_ADDRESS)} 
+                                    disabled={isProcessing}
+                                    className="px-8 py-4 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-sky-500/20 transition-all active:scale-95"
+                                  >
+                                    {isProcessing ? 'Wait...' : 'Top Up'}
+                                  </button>
                                 </div>
                               </div>
-                            </div>
-                            <div className="flex items-center gap-6">
-                              <div className="text-right">
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Available</p>
-                                <p className="text-2xl font-black text-white italic tracking-tighter">${d.nativeBal.toFixed(2)}</p>
-                              </div>
-                              <button 
-                                onClick={() => handleTopUp(d.nativeBal, d.type, d.address, USDC_ADDRESS)} 
-                                disabled={isProcessing}
-                                className="px-8 py-4 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-sky-500/20 transition-all active:scale-95"
-                              >
-                                {isProcessing ? 'Wait...' : 'Top Up'}
-                              </button>
-                            </div>
                           </div>
-                      </div>
-                    )) : (
-                      <div className="text-center py-12 premium-glass rounded-[2rem] border-none">
-                        <p className="text-slate-500 text-sm font-black uppercase tracking-widest italic opacity-40">Initializing Protocol Node...</p>
-                      </div>
-                    )}
+                        ));
+                      }
+
+                      return (
+                        <div className="text-center py-12 premium-glass rounded-[2rem] border-none">
+                          <p className="text-slate-500 text-sm font-black uppercase tracking-widest italic opacity-40">Initializing Protocol Node...</p>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
