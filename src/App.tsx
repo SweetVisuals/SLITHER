@@ -1789,16 +1789,15 @@ export default function App() {
                       const isBiconomyV1 = d.type === 'Biconomy V1';
                       const hasBalance = d.bal > 0 || d.nativeBal > 0 || d.bridgedBal > 0;
                       const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
-                      const isHouse = d.type === 'House Treasury';
                       
                       // Show if it has balance OR if it's the specific Biconomy V1 node (even if 0)
-                      return (hasBalance || isBiconomyV1) && (isSmart || isHouse);
+                      // House Treasury is now always hidden from this list
+                      return (hasBalance || isBiconomyV1) && isSmart;
                     }).length > 0 ? detectedAddresses.filter(d => {
                       const isBiconomyV1 = d.type === 'Biconomy V1';
                       const hasBalance = d.bal > 0 || d.nativeBal > 0 || d.bridgedBal > 0;
                       const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
-                      const isHouse = d.type === 'House Treasury';
-                      return (hasBalance || isBiconomyV1) && (isSmart || isHouse);
+                      return (hasBalance || isBiconomyV1) && isSmart;
                     }).map((d, i) => (
                       <div key={i} className="space-y-3">
                         <div className="premium-glass p-6 rounded-3xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-6 hover:bg-white/[0.05] transition-all group/row">
