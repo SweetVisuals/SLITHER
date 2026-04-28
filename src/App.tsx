@@ -111,7 +111,6 @@ export default function App() {
             }
           }
         });
-        (smartAccount as any).setChain(42161);
         smartAccountRef.current = smartAccount;
         console.log('[AA] Smart Account initialized successfully');
       } catch (err) {
@@ -171,6 +170,16 @@ export default function App() {
           const targetVersion = targetType.toLowerCase().includes('v1') ? '1.0.0' : '2.0.0';
           const targetName = targetType.toLowerCase().includes('biconomy') ? 'BICONOMY' : 'SIMPLE';
           
+          // Ensure provider is on Arbitrum One to avoid "Invalid Chain: 1" errors
+          try {
+            await (provider as any).request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0xa4b1' }]
+            });
+          } catch (e) {
+            console.warn('[TopUp] Chain switch warning:', e);
+          }
+
           saInstance = new SmartAccount(provider as any, {
             projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
             clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
@@ -182,7 +191,6 @@ export default function App() {
               }
             }
           });
-          (saInstance as any).setChain(42161);
           activeAddress = await saInstance.getAddress();
           console.log(`[TopUp] Initialized temporary ${targetType} instance at ${activeAddress}`);
         }
