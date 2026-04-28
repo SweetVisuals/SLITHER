@@ -402,16 +402,22 @@ export default function App() {
           }
         };
 
-        // Start polling
+        // Start polling with a hard limit
+        const MAX_POLL_ATTEMPTS = 15; // 75 seconds total
         const interval = setInterval(async () => {
+          if (attempts >= MAX_POLL_ATTEMPTS) {
+             clearInterval(interval);
+             setIsProcessing(false);
+             setSyncingTxHash(null);
+             notify("Sync timeout. The funds reached the treasury but the balance update is taking longer than expected. Please refresh in a minute.", "warning");
+             return;
+          }
           const finished = await pollDeposit();
           if (finished) clearInterval(interval);
         }, 5000);
 
         // Also check once immediately
         pollDeposit().then(finished => { if (finished) clearInterval(interval); });
-        // Safety timeout: stop processing after 2 minutes
-        setTimeout(() => setIsProcessing(false), 120000);
       }
     };
 
@@ -632,7 +638,6 @@ export default function App() {
           bridgedBal: balData.bridgedBal 
         });
       }
-      setDetectedAddresses(newDetected);
 
       // Find the best wallet for quick top-up (Prioritize GASSLESS Smart Accounts)
       const allOptions: any[] = [];
@@ -674,11 +679,14 @@ export default function App() {
         finalInjected = 0;
       }
 
-      // Prioritize Smart Account for the primary address (enables gassless experience)
-      const smartAddr = aaExtras?.biconomyAddress || aaExtras?.simpleAddress || (userInfo as any).biconomyV1Address || (userInfo as any).simpleV2Address;
-      const primaryAddr = forcedAddress || smartAddr || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
+      // Prioritize Smart Accounts (Biconomy > Simple) over EOAs
+      const smartAddr = aaExtras?.biconomyAddress || (userInfo as any).biconomyV2Address || aaExtras?.simpleAddress || (userInfo as any).biconomyV1Address || (userInfo as any).simpleV2Address;
+      const primaryAddr = smartAddr || forcedAddress || userAddress || pWallets[0]?.public_address || (userInfo as any).public_address;
       
-      if (primaryAddr && !userAddress) setUserAddress(primaryAddr);
+      if (primaryAddr && (!userAddress || userAddress !== primaryAddr)) {
+        console.log('[Diagnostic] Setting primary address to:', primaryAddr);
+        setUserAddress(primaryAddr);
+      }
 
       if (data) {
         // Update profile but preserve the credit balance as is
@@ -755,155 +763,70 @@ export default function App() {
     }
   }, [userInfo?.uuid, userAddress, provider, ethAddress]);
 
-  // Sync with Supabase on auth change
-  useEffect(() => {
-    console.log('Auth State Change:', { 
-      connectionStatus, 
-      hasUserInfo: !!userInfo, 
-      walletsCount: userInfo.wallets?.length,
-      hasAuthProvider: !!authProvider,
-      hasEthProvider: !!ethProvider,
-      ethAddress
-    });
-
-    const getAddress = async () => {
-      if (connectionStatus === 'connected' && userInfo) {
-        console.log('[Diagnostic] Full UserInfo keys:', Object.keys(userInfo));
-        
-        let biconomyAddress = '';
-        let simpleAddress = '';
-        
-        if (provider) {
-          try {
-            let chainId = await (provider as any).request({ method: 'eth_chainId' });
-            console.log('[Diagnostic] Current Chain ID:', chainId);
-
-            // Force switch to Arbitrum One (0xa4b1) if on wrong chain
-            if (chainId !== '0xa4b1' && chainId !== 42161) {
-              console.log('[Diagnostic] Attempting to switch to Arbitrum One...');
-              try {
-                await (provider as any).request({
-                  method: 'wallet_switchEthereumChain',
-                  params: [{ chainId: '0xa4b1' }]
-                });
-                // Refresh chainId after switch
-                chainId = await (provider as any).request({ method: 'eth_chainId' });
-                console.log('[Diagnostic] Chain ID after switch:', chainId);
-              } catch (switchErr) {
-                console.warn('[Diagnostic] Chain switch failed:', switchErr);
-              }
-            }
-
-            const initSA = async (type: string, version: string = '2.0.0') => {
-              try {
-                const sa = new SmartAccount(provider, {
-                  projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
-                  clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
-                  appId: import.meta.env.VITE_PARTICLE_APP_ID,
-                  aaOptions: {
-                    accountContracts: {
-                      [type]: [{ version, chainIds: [ArbitrumOne.id] }]
-                    }
-                  }
-                });
-                const address = await sa.getAddress();
-                console.log(`[Diagnostic] Discovered ${type} ${version}:`, address);
-                return address;
-              } catch (e) {
-                console.warn(`[Diagnostic] Failed to init ${type} ${version} account:`, e);
-                return '';
-              }
-            };
-            
-            biconomyAddress = await initSA('BICONOMY', '2.0.0');
-            const biconomyV1Address = await initSA('BICONOMY', '1.0.0');
-            simpleAddress = await initSA('SIMPLE', '1.0.0');
-            const simpleV2Address = await initSA('SIMPLE', '2.0.0');
-            
-            if (biconomyAddress) (userInfo as any).biconomyV2Address = biconomyAddress;
-            if (biconomyV1Address) (userInfo as any).biconomyV1Address = biconomyV1Address;
-            if (simpleAddress) (userInfo as any).simpleV1Address = simpleAddress;
-            if (simpleV2Address) (userInfo as any).simpleV2Address = simpleV2Address;
-          } catch (aaInitErr) {
-            console.warn('[Diagnostic] AA SDK overall initialization failed:', aaInitErr);
-          }
-        }
-        
-        // Log all detected wallet data
-        userInfo.wallets?.forEach((w: any, idx: number) => {
-          console.log(`[Diagnostic] Wallet ${idx} address:`, w.public_address);
-        });
-
-        // Prioritize: Biconomy -> Simple -> ethAddress -> wallets list -> EOA
-        const smartAccountFromList = userInfo.wallets?.find((w: any) => 
-          w.type?.toLowerCase().includes('smart') || 
-          w.type?.toLowerCase().includes('aa') || 
-          w.type?.toLowerCase().includes('biconomy') ||
-          w.type?.toLowerCase().includes('erc4337') ||
-          w.type?.toLowerCase().includes('simple') ||
-          w.type?.toLowerCase().includes('light')
-        );
-        
-        const evmWallet = userInfo.wallets?.find((w: any) => 
-          w.chain_name?.toLowerCase().includes('evm') || 
-          w.public_address?.startsWith('0x')
-        );
-        
-        let address = biconomyAddress || simpleAddress || ethAddress || smartAccountFromList?.public_address || evmWallet?.public_address || userInfo.wallets?.[0]?.public_address || (userInfo as any).public_address;
-        
-        console.log('Selected Address Logic:', { biconomyAddress, simpleAddress, ethAddress, smartType: smartAccountFromList?.public_address, evmType: evmWallet?.public_address });
-        console.log('Final Selected Address:', address);
-
-        if (address) {
-          setUserAddress(address);
-          fetchUserData(address, 0, { biconomyAddress, simpleAddress });
-        }
-      }
-    };
-    getAddress();
-  }, [fetchUserData, userInfo?.uuid]);
-
-  // Handle address discovery separately to keep dependencies clean
+  // Consolidated Address Discovery & Sync Logic
   useEffect(() => {
     if (connectionStatus !== 'connected' || !userInfo?.uuid) return;
     
-    const discoverAddresses = async () => {
+    const initializeUserNode = async () => {
       let biconomyAddress = '';
       let simpleAddress = '';
       
       if (provider) {
         try {
           const initSA = async (type: string, version: string = '2.0.0') => {
-            const sa = new SmartAccount(provider, {
-              projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
-              clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
-              appId: import.meta.env.VITE_PARTICLE_APP_ID,
-              aaOptions: {
-                accountContracts: {
-                  [type]: [{ version, chainIds: [ArbitrumOne.id] }]
+            try {
+              const sa = new SmartAccount(provider, {
+                projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
+                clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
+                appId: import.meta.env.VITE_PARTICLE_APP_ID,
+                aaOptions: {
+                  accountContracts: {
+                    [type]: [{ version, chainIds: [ArbitrumOne.id] }]
+                  }
                 }
-              }
-            });
-            return await sa.getAddress();
+              });
+              const address = await sa.getAddress();
+              console.log(`[Diagnostic] Discovered ${type} ${version}:`, address);
+              return address;
+            } catch (e) {
+              console.warn(`[Diagnostic] Failed to init ${type} ${version}:`, e);
+              return '';
+            }
           };
           
           biconomyAddress = await initSA('BICONOMY', '2.0.0');
+          const biconomyV1 = await initSA('BICONOMY', '1.0.0');
           simpleAddress = await initSA('SIMPLE', '1.0.0');
-        } catch (e) {
-          console.warn('Address discovery error:', e);
+          const simpleV2 = await initSA('SIMPLE', '2.0.0');
+
+          // Store for metadata
+          if (biconomyAddress) (userInfo as any).biconomyV2Address = biconomyAddress;
+          if (biconomyV1) (userInfo as any).biconomyV1Address = biconomyV1;
+          if (simpleAddress) (userInfo as any).simpleV1Address = simpleAddress;
+          if (simpleV2) (userInfo as any).simpleV2Address = simpleV2;
+          
+        } catch (aaInitErr) {
+          console.warn('[Diagnostic] AA SDK overall initialization failed:', aaInitErr);
         }
       }
-
-      const address = biconomyAddress || simpleAddress || ethAddress || userInfo.wallets?.[0]?.public_address;
-      if (address && address !== userAddress) {
-        setUserAddress(address);
-        fetchUserData(address, 0, { biconomyAddress, simpleAddress });
+      
+      // Strict Priority: Biconomy V2 -> Biconomy V1 -> Simple -> Fallback (only if no AA found)
+      const primaryBiconomy = biconomyAddress || (userInfo as any).biconomyV1Address;
+      const primarySimple = simpleAddress || (userInfo as any).simpleV2Address;
+      
+      const finalAddress = primaryBiconomy || primarySimple || ethAddress || userInfo.wallets?.[0]?.public_address;
+      
+      console.log('[Diagnostic] Final Primary Node Selected:', finalAddress);
+      
+      if (finalAddress) {
+        setUserAddress(finalAddress);
+        fetchUserData(finalAddress, 0, { biconomyAddress: primaryBiconomy, simpleAddress: primarySimple });
       } else if (!userProfile && userInfo?.uuid) {
         fetchUserData();
       }
     };
 
-    discoverAddresses();
+    initializeUserNode();
   }, [connectionStatus, userInfo?.uuid, provider, ethAddress]);
 
 
@@ -1117,7 +1040,7 @@ export default function App() {
                 },
                 body: JSON.stringify({ 
                   action: 'COLLECT', 
-                  payload: { amount: flushAmount, userId: userInfo?.uuid } 
+                  payload: { amount: flushAmount, userId: userInfo?.uuid || userProfile?.id } 
                 })
               });
               
@@ -1855,83 +1778,45 @@ export default function App() {
                   <div className="flex items-center justify-between px-2">
                     <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
                       <Zap className="w-3 h-3 text-sky-400" />
-                      Top Up Balance
+                      Protocol Top Up (Gassless)
                     </h4>
                   </div>
-
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {detectedAddresses.filter(d => {
-                      if (d.type === 'House Treasury') return false;
                       const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
-                      if (isSmart && d.bal <= 0) return false;
-                      return true;
+                      const isHouse = d.type === 'House Treasury';
+                      return isSmart || isHouse;
                     }).length > 0 ? detectedAddresses.filter(d => {
-                      if (d.type === 'House Treasury') return false;
                       const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
-                      if (isSmart && d.bal <= 0) return false;
-                      return true;
+                      const isHouse = d.type === 'House Treasury';
+                      return isSmart || isHouse;
                     }).map((d, i) => (
-                      <div key={i} className="space-y-2">
+                      <div key={i} className="space-y-3">
                         {d.nativeBal > 0 && (
-                          <div className="premium-glass p-4 rounded-2xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/[0.05] transition-all group/row">
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-xl bg-slate-800/50 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
-                                <Wallet className="w-5 h-5" />
+                          <div className="premium-glass p-6 rounded-3xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-6 hover:bg-white/[0.05] transition-all group/row">
+                            <div className="flex items-center gap-5">
+                              <div className="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-400 group-hover/row:scale-110 transition-transform">
+                                <Zap className="w-6 h-6" />
                               </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-black text-white group-hover/row:text-sky-400 transition-colors uppercase tracking-tight truncate">
+                              <div className="min-w-0">
+                                <p className="text-base font-black text-white group-hover/row:text-sky-400 transition-colors uppercase tracking-tight">
                                   {d.type} (USDC)
                                 </p>
                                 <div className="flex items-center gap-2">
-                                  <p className="text-[10px] font-mono text-slate-500 truncate">{d.addr}</p>
-                                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple') ? 'bg-sky-500/10 text-sky-400' : 'bg-amber-500/10 text-amber-500'}`}>
-                                    {d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple') ? 'GASSLESS' : 'REQUIRES ETH'}
-                                  </span>
+                                  <p className="text-[10px] font-mono text-slate-500">{d.address.slice(0,12)}...{d.address.slice(-8)}</p>
+                                  <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 uppercase tracking-widest">GASSLESS NODE</span>
                                 </div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-6">
                               <div className="text-right">
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Available</p>
-                                <p className="text-lg font-black text-white italic tracking-tighter leading-none">${d.nativeBal.toFixed(2)}</p>
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Available</p>
+                                <p className="text-2xl font-black text-white italic tracking-tighter">${d.nativeBal.toFixed(2)}</p>
                               </div>
                               <button 
-                                onClick={() => handleTopUp(d.nativeBal, d.type, d.addr, USDC_ADDRESS)} 
+                                onClick={() => handleTopUp(d.nativeBal, d.type, d.address, USDC_ADDRESS)} 
                                 disabled={isProcessing}
-                                className="px-6 py-2.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 disabled:grayscale text-slate-950 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-sky-500/10 transition-all active:scale-95 whitespace-nowrap"
-                              >
-                                {isProcessing ? 'Wait...' : 'Top Up'}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        {d.bridgedBal > 0 && (
-                          <div className="premium-glass p-4 rounded-2xl border-none flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/[0.05] transition-all group/row">
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-xl bg-slate-800/50 flex items-center justify-center text-emerald-400 group-hover/row:scale-110 transition-transform">
-                                <Wallet className="w-5 h-5" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-black text-white group-hover/row:text-emerald-400 transition-colors uppercase tracking-tight truncate">
-                                  {d.type} (USDC.e)
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <p className="text-[10px] font-mono text-slate-500 truncate">{d.addr}</p>
-                                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple') ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-500'}`}>
-                                    {d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple') ? 'GASSLESS' : 'REQUIRES ETH'}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <div className="text-right">
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Available</p>
-                                <p className="text-lg font-black text-emerald-400 italic tracking-tighter leading-none">${d.bridgedBal.toFixed(2)}</p>
-                              </div>
-                              <button 
-                                onClick={() => handleTopUp(d.bridgedBal, d.type, d.addr, USDC_E_ADDRESS)} 
-                                disabled={isProcessing}
-                                className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:grayscale text-slate-950 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-500/10 transition-all active:scale-95 whitespace-nowrap"
+                                className="px-8 py-4 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-sky-500/20 transition-all active:scale-95"
                               >
                                 {isProcessing ? 'Wait...' : 'Top Up'}
                               </button>
@@ -1940,8 +1825,8 @@ export default function App() {
                         )}
                       </div>
                     )) : (
-                      <div className="text-center py-10 premium-glass rounded-2xl border-none">
-                        <p className="text-slate-500 text-xs font-black uppercase tracking-widest italic">No compatible wallets found with USDC</p>
+                      <div className="text-center py-12 premium-glass rounded-[2rem] border-none">
+                        <p className="text-slate-500 text-sm font-black uppercase tracking-widest italic opacity-40">Initializing Protocol Node...</p>
                       </div>
                     )}
                   </div>

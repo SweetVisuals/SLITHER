@@ -48,22 +48,29 @@ Deno.serve(async (req) => {
     const { action, payload } = body;
     console.log(`[GameEngine] Action: ${action}`, payload);
     
-    // Auth Logic: Prefer Supabase JWT, fallback to payload userId for Particle users
+    // Auth Logic: Prefer Payload userId for consistent action targeting, fallback to Supabase JWT
     let userId = payload?.userId;
     const authHeader = req.headers.get('Authorization');
+    
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.replace('Bearer ', '');
       if (token && token !== 'undefined') {
         try {
           const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
           if (!authError && user) {
-            userId = user.id;
-            console.log(`[GameEngine] Identified user via JWT: ${userId}`);
+            console.log(`[GameEngine] JWT ID: ${user.id} | Payload ID: ${payload?.userId}`);
+            // If they differ, we favor the payload ID for game actions if provided
+            if (!userId) userId = user.id;
           }
-        } catch (e) {
-          console.error('[GameEngine] Auth error:', e.message);
+        } catch (e: any) {
+          console.error('[GameEngine] Auth verification error:', e.message);
         }
       }
+    }
+    
+    if (!userId) {
+      console.error('[GameEngine] No valid userId found in payload or JWT');
+      throw new Error('Authentication required');
     }
 
     if (!userId) {
@@ -313,19 +320,21 @@ Deno.serve(async (req) => {
       let receipt = null;
       let retries = 15; // Increased retries for slow bundlers
       
-      // Retry loop for receipt - direct and robust
+      // Robust receipt polling with a short delay for indexing
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       while (retries > 0 && !receipt) {
         try {
           receipt = await provider.getTransactionReceipt(txHash);
           if (!receipt) {
             console.log(`[GameEngine] Receipt for ${txHash} not found yet. Retrying... (${retries} left)`);
             retries--;
-            if (retries > 0) await new Promise(resolve => setTimeout(resolve, 3000));
+            if (retries > 0) await new Promise(resolve => setTimeout(resolve, 4000));
           }
-        } catch (e) {
+        } catch (e: any) {
           console.warn(`[GameEngine] Error fetching receipt ${txHash}:`, e.message);
           retries--;
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 4000));
         }
       }
 
