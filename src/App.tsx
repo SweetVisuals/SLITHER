@@ -321,7 +321,10 @@ export default function App() {
               }
             }
 
-            if (!txHash) throw new Error('Timed out waiting for transaction hash. Please check your wallet history.');
+            if (!txHash) {
+              console.log('[TopUp] Bundling timed out, but transaction might still confirm. Attempting to use UserOpHash as fallback.');
+              txHash = userOpHash; // Fallback to UserOpHash if we can't get TxHash - backend will try to resolve it
+            }
           } else {
             let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
             finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
@@ -349,7 +352,10 @@ export default function App() {
               }
             }
 
-            if (!txHash) throw new Error('Timed out waiting for transaction hash. Please check your wallet history.');
+            if (!txHash) {
+              console.log('[TopUp] Bundling timed out, but transaction might still confirm. Attempting to use UserOpHash as fallback.');
+              txHash = userOpHash;
+            }
           }
         } else {
         const browserProvider = new ethers.BrowserProvider(provider as any);
@@ -407,15 +413,16 @@ export default function App() {
 
             const result = await res.json();
             if (result.success) {
-              notify(`Success! Added $${result.added.toFixed(2)} to your balance.`, 'success');
+              const addedAmount = Number(result.added || 0);
+              notify(`Success! Added $${addedAmount.toFixed(2)} to your balance.`, 'success');
               setBalance(result.newBalance);
               setSyncingTxHash(null);
               setIsProcessing(false);
               fetchUserData();
               return true; // Stop polling
-            } else if (res.status === 400 && (result.error?.toLowerCase().includes('not detected yet') || result.error?.toLowerCase().includes('timeout'))) {
+            } else if (res.status === 400 && (result.error?.toLowerCase().includes('not detected yet') || result.error?.toLowerCase().includes('timeout') || result.error?.toLowerCase().includes('null'))) {
               attempts++;
-              if (attempts % 3 === 0) notify(`Syncing with blockchain... (Attempt ${attempts})`, 'info');
+              if (attempts % 2 === 0) notify(`Synchronizing credit buffer... (${attempts}/${MAX_POLL_ATTEMPTS})`, 'info');
               return false; // Continue polling
             } else {
               throw new Error(result.error || 'Failed to award credits');
