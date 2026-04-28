@@ -149,43 +149,32 @@ export default function App() {
     if (!userInfo?.uuid || isProcessing) return;
     
     setIsProcessing(true);
+    let txHash = '';
     const tokenSymbol = tokenAddress.toLowerCase() === USDC_E_ADDRESS.toLowerCase() ? 'USDC.e' : 'USDC';
     try {
       notify(`Initiating deposit of ${amount.toFixed(2)} ${tokenSymbol} from ${targetType}...`, 'info');
 
       if (!provider) throw new Error('No wallet provider found');
 
-      // Smart Account instance will be handled by the logic below based on targetType/targetAddr
-
       const currentActiveAddr = await smartAccountRef.current?.getAddress();
       
       // Determine if we need a different Smart Account instance (e.g. V1 instead of V2)
       const isSA = targetType?.toLowerCase().includes('biconomy') || targetType?.toLowerCase().includes('simple');
       
-        let saInstance = smartAccountRef.current;
-        let activeAddress = currentActiveAddr;
+      let saInstance = smartAccountRef.current;
+      let activeAddress = currentActiveAddr;
 
         if (isSA && (!currentActiveAddr || targetAddr?.toLowerCase() !== currentActiveAddr.toLowerCase())) {
           notify(`Switching to ${targetType} node...`, 'info');
           const targetVersion = targetType.toLowerCase().includes('v1') ? '1.0.0' : '2.0.0';
           const targetName = targetType.toLowerCase().includes('biconomy') ? 'BICONOMY' : 'SIMPLE';
           
-          // Ensure provider is on Arbitrum One to avoid "Invalid Chain: 1" errors
-          try {
-            await (provider as any).request({
-              method: 'wallet_switchEthereumChain',
-              params: [{ chainId: '0xa4b1' }]
-            });
-          } catch (e) {
-            console.warn('[TopUp] Chain switch warning:', e);
-          }
-
           saInstance = new SmartAccount(provider as any, {
             projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
             clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
             appId: import.meta.env.VITE_PARTICLE_APP_ID,
+            chainId: 42161,
             aaOptions: {
-              chainId: 42161,
               accountContracts: {
                 [targetName]: [{ version: targetVersion, chainIds: [42161] }]
               }
@@ -197,7 +186,6 @@ export default function App() {
 
         const isSmartAccount = !!saInstance && activeAddress && targetAddr?.toLowerCase() === activeAddress.toLowerCase();
 
-        let txHash = '';
         if (isSmartAccount && saInstance) {
           notify(`Analyzing gas logistics...`, 'info');
           const usdcInterface = new ethers.Interface(["function transfer(address to, uint256 amount) returns (bool)", "function balanceOf(address) view returns (uint256)"]);
