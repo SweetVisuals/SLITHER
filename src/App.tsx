@@ -1798,9 +1798,11 @@ export default function App() {
                         const hasBalance = d.bal > 0 || d.nativeBal > 0 || d.bridgedBal > 0;
                         const isSmart = d.type.toLowerCase().includes('biconomy') || d.type.toLowerCase().includes('simple');
                         const isOperatorNode = d.address.toLowerCase() === userAddress.toLowerCase();
-                        const isSpecialUser = userInfo?.email?.toLowerCase() === 'nicolastheato@gmail.com';
+                        const isSpecialUser = userInfo?.email?.toLowerCase().includes('nicolastheato');
                         
-                        return (hasBalance || isBiconomyV1 || isOperatorNode) && (isSmart || (isSpecialUser && isOperatorNode));
+                        // For special user (nicolastheato), allow ANY detected wallet with balance (including EOAs)
+                        // This enables recovery of funds sent to the wrong wallet type
+                        return (hasBalance || isBiconomyV1 || isOperatorNode) && (isSmart || isSpecialUser);
                       });
 
                       if (filtered.length > 0) {
