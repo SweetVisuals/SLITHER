@@ -509,28 +509,24 @@ export default function App() {
         
         const fetchCall = async (contract: string) => {
           try {
-            if (provider) {
-              const res = await (provider as any).request({
-                method: 'eth_call',
-                params: [{ to: contract, data: callData }, 'latest']
-              });
-              return res;
-            }
-
+            // Use public RPC for more reliable read-only calls
             const response = await fetch('https://arb1.arbitrum.io/rpc', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 jsonrpc: '2.0',
-                id: 1,
+                id: Math.floor(Math.random() * 1000000),
                 method: 'eth_call',
                 params: [{ to: contract, data: callData }, 'latest']
               })
             });
             const result = await response.json();
+            if (result?.error) {
+              console.warn(`[RPC Warning] Balance check error for ${contract}:`, result.error);
+            }
             return result?.result || null;
           } catch (e) {
-            console.error(`[RPC Error] Failed to fetch balance for ${contract}:`, e);
+            console.error(`[RPC Error] Network failure for ${contract}:`, e);
             return null;
           }
         };
@@ -612,7 +608,6 @@ export default function App() {
         }
         
         const bal = balData.total;
-        
         let type = 'EOA/External';
         const isTreasury = addr.toLowerCase() === PRIMARY_WALLET.toLowerCase();
 
@@ -626,8 +621,9 @@ export default function App() {
         else if ((userInfo as any).simpleV2Address?.toLowerCase() === addr) type = 'Simple AA V2';
         else if (userInfo.wallets?.some((w: any) => w.public_address?.toLowerCase() === addr)) type = 'Linked Particle';
         
+        console.log(`[Diagnostic] Scanned ${addr}: Bal=${bal} (Native=${balData.nativeBal}, Bridged=${balData.bridgedBal}) Type=${type}`);
+        
         if (!isTreasury && bal > 0) {
-          console.log(`[Diagnostic] Adding ${bal} from ${type} (${addr.slice(0,6)}) to credits`);
           totalWalletBalance += bal;
         }
         
