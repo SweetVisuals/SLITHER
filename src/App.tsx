@@ -305,7 +305,23 @@ export default function App() {
             while (!receipt && pollingAttempts < 45) {
               try {
                 console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
-                receipt = await (provider as any).request({ method: 'eth_getUserOperationReceipt', params: [userOpHash] });
+                
+                // Use fetch to query Particle Bundler directly since provider might not support eth_getUserOperationReceipt
+                const bundlerUrl = `https://api.particle.network/evm-chain/bundle?chainId=42161&projectUuid=${import.meta.env.VITE_PARTICLE_PROJECT_ID}&projectKey=${import.meta.env.VITE_PARTICLE_CLIENT_KEY}`;
+                const rpcRes = await fetch(bundlerUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: Date.now(),
+                    method: 'eth_getUserOperationReceipt',
+                    params: [userOpHash]
+                  })
+                });
+                
+                const rpcData = await rpcRes.json();
+                receipt = rpcData.result;
+
                 if (receipt?.transactionHash) {
                   txHash = receipt.transactionHash;
                   console.log(`[TopUp] Found Transaction Hash: ${txHash}`);
@@ -336,7 +352,23 @@ export default function App() {
             while (!receipt && pollingAttempts < 45) {
               try {
                 console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
-                receipt = await (provider as any).request({ method: 'eth_getUserOperationReceipt', params: [userOpHash] });
+                
+                // Use fetch to query Particle Bundler directly since provider might not support eth_getUserOperationReceipt
+                const bundlerUrl = `https://api.particle.network/evm-chain/bundle?chainId=42161&projectUuid=${import.meta.env.VITE_PARTICLE_PROJECT_ID}&projectKey=${import.meta.env.VITE_PARTICLE_CLIENT_KEY}`;
+                const rpcRes = await fetch(bundlerUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: Date.now(),
+                    method: 'eth_getUserOperationReceipt',
+                    params: [userOpHash]
+                  })
+                });
+                
+                const rpcData = await rpcRes.json();
+                receipt = rpcData.result;
+
                 if (receipt?.transactionHash) {
                   txHash = receipt.transactionHash;
                   console.log(`[TopUp] Found Transaction Hash: ${txHash}`);
