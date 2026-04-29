@@ -1,3 +1,10 @@
+import { Buffer } from 'buffer';
+(window as any).Buffer = Buffer;
+import process from 'process';
+(window as any).process = process;
+import { EventEmitter } from 'events';
+(window as any).EventEmitter = EventEmitter;
+
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import { AuthCoreContextProvider } from '@particle-network/auth-core-modal';

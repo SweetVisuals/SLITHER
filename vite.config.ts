@@ -39,8 +39,8 @@ export default defineConfig(({mode}) => {
       serveParticleWasm(),
       react(), 
       tailwindcss(),
-      wasm(),
       topLevelAwait(),
+      wasm(),
       nodePolyfills({
         include: ['buffer', 'process', 'util', 'stream', 'events'],
         globals: {
@@ -59,7 +59,15 @@ export default defineConfig(({mode}) => {
       },
     },
     optimizeDeps: {
-      include: ['buffer'],
+      include: [
+        'buffer',
+        'process',
+        'events',
+        '@particle-network/aa',
+        '@particle-network/auth-core-modal',
+        '@particle-network/chains',
+        'ethers'
+      ],
     },
     build: {
       target: 'esnext',
