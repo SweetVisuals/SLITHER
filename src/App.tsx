@@ -165,7 +165,14 @@ export default function App() {
     // Helper for instant credit application
     const triggerInstantCredit = async (hash: string, amt: number) => {
       try {
-        console.log(`[TopUp] Requesting instant credit for ${amt} (TX: ${hash})`);
+        const payload = { 
+          userId: userInfo.uuid, 
+          txHash: hash, 
+          amount: Number(amt),
+          providedAmount: Number(amt) // Fallback for some backend versions
+        };
+        console.log(`[TopUp] Requesting instant credit:`, payload);
+        
         const { data: { session: authSession } } = await supabase.auth.getSession();
         const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
           method: 'POST',
@@ -173,8 +180,9 @@ export default function App() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
           },
-          body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash: hash, amount: amt } })
+          body: JSON.stringify({ action: 'DEPOSIT', payload })
         });
+        
         const data = await res.json();
         console.log('[TopUp] Instant credit response:', data);
         if (data.success) {

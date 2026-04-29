@@ -311,15 +311,17 @@ Deno.serve(async (req) => {
 
     if (action === 'DEPOSIT') {
       const { txHash, amount: providedAmount } = payload;
+      console.log(`[GameEngine] DEPOSIT triggered for user ${userId}. Amount: ${providedAmount}, Hash: ${txHash}`);
+      
       if (!txHash) throw new Error('No transaction hash provided');
 
       let totalDeposited = Number(providedAmount) || 0;
       
       // If amount is provided, we trust it for instant credit as requested
       if (totalDeposited > 0) {
-        console.log(`[GameEngine] Instant credit requested: ${totalDeposited} for user ${userId} (TX: ${txHash})`);
+        console.log(`[GameEngine] Instant credit confirmed: ${totalDeposited} for user ${userId}`);
       } else {
-        console.log(`[GameEngine] Verifying deposit: ${txHash} for user ${userId}`);
+        console.log(`[GameEngine] Verifying deposit on-chain: ${txHash} for user ${userId}`);
         const provider = new ethers.JsonRpcProvider("https://arb1.arbitrum.io/rpc");
         
         let receipt = null;
@@ -366,7 +368,10 @@ Deno.serve(async (req) => {
           throw new Error('transaction reverted');
         }
 
-        if (totalDeposited <= 0) throw new Error('not detected yet');
+        if (totalDeposited <= 0) {
+           console.error(`[GameEngine] Deposit verification failed for ${txHash}. Total detected: ${totalDeposited}`);
+           throw new Error('not detected yet');
+        }
       }
 
       // Award credits
