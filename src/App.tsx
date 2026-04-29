@@ -99,6 +99,32 @@ export default function App() {
 
   // Initialize SmartAccount once to avoid WASM re-init crashes
   useEffect(() => {
+    const initWalletPlugin = async () => {
+      try {
+        const { walletEntryPlugin } = await import('@particle-network/wallet');
+        walletEntryPlugin.init(
+          {
+            projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID || '3a913b51-6884-4638-bd23-fa0d728c7975',
+            clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY || 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
+            appId: import.meta.env.VITE_PARTICLE_APP_ID || '8c38a8da-9800-4764-9007-76d512c5163e',
+          },
+          {
+            walletEntranceStyle: {
+              pointerEvents: 'none',
+              opacity: 0,
+              width: 0,
+              height: 0,
+              display: 'none',
+            }
+          }
+        );
+        console.log('[Diagnostic] Wallet entry plugin initialized');
+      } catch (err) {
+        console.error('[Diagnostic] Wallet plugin init error:', err);
+      }
+    };
+    initWalletPlugin();
+
     if (!provider || smartAccountRef.current || aaInitializingRef.current) return;
 
     const initAA = async () => {

@@ -16,26 +16,11 @@ import {createRoot} from 'react-dom/client';
 import { ArbitrumOne } from '@particle-network/chains';
 console.log('[Diagnostic] ArbitrumOne:', ArbitrumOne);
 import { AuthCoreContextProvider } from '@particle-network/auth-core-modal';
-import { walletEntryPlugin } from '@particle-network/wallet';
+// walletEntryPlugin will be initialized dynamically in App.tsx
 import App from './App.tsx';
 import './index.css';
 
-walletEntryPlugin.init(
-  {
-    projectId: '3a913b51-6884-4638-bd23-fa0d728c7975',
-    clientKey: 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
-    appId: '8c38a8da-9800-4764-9007-76d512c5163e',
-  },
-  {
-    walletEntranceStyle: {
-      pointerEvents: 'none',
-      opacity: 0,
-      width: 0,
-      height: 0,
-      display: 'none',
-    }
-  }
-);
+// Wallet entry initialization moved to App.tsx
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
