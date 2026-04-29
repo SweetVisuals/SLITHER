@@ -948,13 +948,27 @@ useEffect(() => {
       try {
         const initSA = async (type: string, version: string = '2.0.0') => {
           try {
-            const sa = new SmartAccount(provider, {
-              projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
-              clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
-              appId: import.meta.env.VITE_PARTICLE_APP_ID,
+            const forcedProvider = new Proxy(provider as any, {
+              get(target, prop, receiver) {
+                if (prop === 'request') {
+                  return async (args: any) => {
+                    if (args?.method === 'eth_chainId') return '0xa4b1';
+                    return target.request(args);
+                  };
+                }
+                const value = Reflect.get(target, prop, receiver);
+                return typeof value === 'function' ? value.bind(target) : value;
+              }
+            });
+
+            const sa = new SmartAccount(forcedProvider as any, {
+              projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID || '3a913b51-6884-4638-bd23-fa0d728c7975',
+              clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY || 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
+              appId: import.meta.env.VITE_PARTICLE_APP_ID || '8c38a8da-9800-4764-9007-76d512c5163e',
               aaOptions: {
+                chainId: 42161,
                 accountContracts: {
-                  [type]: [{ version, chainIds: [ArbitrumOne.id] }]
+                  [type]: [{ version, chainIds: [42161] }]
                 }
               }
             });

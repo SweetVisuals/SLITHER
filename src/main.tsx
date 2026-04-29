@@ -4,9 +4,17 @@ import process from 'process';
 (window as any).process = process;
 import { EventEmitter } from 'events';
 (window as any).EventEmitter = EventEmitter;
+(window as any).global = window;
+(window as any).globalObject = window;
+(window as any).process.env = {};
+(window as any).process.browser = true;
+(window as any).process.version = '';
+(window as any).process.nextTick = (cb: any) => setTimeout(cb, 0);
 
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import { ArbitrumOne } from '@particle-network/chains';
+console.log('[Diagnostic] ArbitrumOne:', ArbitrumOne);
 import { AuthCoreContextProvider } from '@particle-network/auth-core-modal';
 import { walletEntryPlugin } from '@particle-network/wallet';
 import App from './App.tsx';
