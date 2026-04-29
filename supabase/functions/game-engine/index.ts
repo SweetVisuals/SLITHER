@@ -370,7 +370,8 @@ Deno.serve(async (req) => {
       }
 
       // Award credits
-      console.log(`[GameEngine] Awarding ${totalDeposited} credits to user ${userId}`);
+      console.log(`[GameEngine] Awarding ${totalDeposited} credits to user ${userId}. (TX: ${txHash})`);
+      
       const { data: profile, error: fetchError } = await supabaseClient
         .from('profiles')
         .select('balance, total_injected')
@@ -378,28 +379,47 @@ Deno.serve(async (req) => {
         .single();
       
       if (fetchError || !profile) {
-        console.error(`[GameEngine] Profile not found for ${userId}. Error:`, fetchError?.message);
-        throw new Error('profile not found');
+        console.error(`[GameEngine] Profile not found for ${userId}. Error: ${fetchError?.message}`);
+        // If profile not found, try to create it if it doesn't exist? 
+        // No, let's just fail and log clearly.
+        throw new Error(`Profile not found for ID: ${userId}`);
       }
 
-      const newBal = (Number(profile.balance) || 0) + totalDeposited;
-      const newInjected = (Number(profile.total_injected) || 0) + totalDeposited;
+      const currentBal = Number(profile.balance) || 0;
+      const currentInjected = Number(profile.total_injected) || 0;
+      const newBal = currentBal + totalDeposited;
+      const newInjected = currentInjected + totalDeposited;
       
-      const { error: updateError, count } = await supabaseClient
+      console.log(`[GameEngine] Profile ${userId} state: Balance ${currentBal} -> ${newBal}, Injected ${currentInjected} -> ${newInjected}`);
+
+      const { data: updatedProfile, error: updateError } = await supabaseClient
         .from('profiles')
         .update({ 
           balance: newBal, 
-          total_injected: newInjected 
+          total_injected: newInjected,
+          updated_at: new Date().toISOString()
         })
-        .eq('id', userId);
+        .eq('id', userId)
+        .select()
+        .single();
 
       if (updateError) {
         console.error(`[GameEngine] DB Update failed for ${userId}:`, updateError.message);
         throw new Error('database update failed');
       }
 
-      console.log(`[GameEngine] Success! New balance for ${userId}: ${newBal}`);
-      return new Response(JSON.stringify({ success: true, added: totalDeposited, newBalance: newBal }), {
+      if (!updatedProfile) {
+        console.error(`[GameEngine] Update succeeded but no profile returned for ${userId}. Row might not exist.`);
+        throw new Error('profile update returned no data');
+      }
+
+      console.log(`[GameEngine] Success! New balance for ${userId}: ${updatedProfile.balance}`);
+      return new Response(JSON.stringify({ 
+        success: true, 
+        added: totalDeposited, 
+        newBalance: updatedProfile.balance,
+        userId: userId
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }

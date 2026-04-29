@@ -161,7 +161,35 @@ export default function App() {
     if (!userInfo?.uuid || isProcessing) return;
     
     setIsProcessing(true);
+    
+    // Helper for instant credit application
+    const triggerInstantCredit = async (hash: string, amt: number) => {
+      try {
+        console.log(`[TopUp] Requesting instant credit for ${amt} (TX: ${hash})`);
+        const { data: { session: authSession } } = await supabase.auth.getSession();
+        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash: hash, amount: amt } })
+        });
+        const data = await res.json();
+        console.log('[TopUp] Instant credit response:', data);
+        if (data.success) {
+          setBalance(data.newBalance);
+          notify(`Instant credit applied: $${amt.toFixed(2)} added!`, 'success');
+          return true;
+        }
+        await fetchUserData();
+      } catch (e) {
+        console.error('[TopUp] Instant credit failed:', e);
+      }
+    };
+
     let txHash = '';
+    let skipFinalSync = false;
     const tokenSymbol = tokenAddress.toLowerCase() === USDC_E_ADDRESS.toLowerCase() ? 'USDC.e' : 'USDC';
     try {
       notify(`Initiating deposit of ${amount.toFixed(2)} ${tokenSymbol} from ${targetType}...`, 'info');
@@ -241,28 +269,9 @@ export default function App() {
             
             console.log(`[TopUp] UserOp Hash: ${userOpHash}`);
 
-            // TRIGGER INSTANT CREDIT IMMEDIATELY
-            const triggerInstantCredit = async (hash: string, amt: number) => {
-              try {
-                const { data: { session: authSession } } = await supabase.auth.getSession();
-                const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
-                  },
-                  body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash: hash, amount: amt } })
-                });
-                const data = await res.json();
-                console.log('[TopUp] Instant credit response:', data);
-                await fetchUserData();
-              } catch (e) {
-                console.error('[TopUp] Instant credit failed:', e);
-              }
-            };
-
-            triggerInstantCredit(userOpHash, finalAmount);
-            setIsProcessing(false); // Unlock UI immediately
+            await triggerInstantCredit(userOpHash, finalAmount);
+            setIsProcessing(false); // Unlock UI immediately after credit attempt
+            skipFinalSync = true;
 
             notify('Bundling transaction...', 'info');
             let receipt = null;
@@ -323,6 +332,15 @@ export default function App() {
               feeQuote: selectedQuote,
               tokenPaymasterAddress: feeQuotes.tokenPaymaster.tokenPaymasterAddress,
             } as any);
+            
+            console.log(`[TopUp] UserOp Hash: ${userOpHash}`);
+            const credited = await triggerInstantCredit(userOpHash, finalAmount);
+            if (credited) {
+              setIsProcessing(false);
+              skipFinalSync = true;
+              // We don't clear txHash here because we still want to poll for the real TX hash 
+              // for the user's information, but the balance is already updated.
+            }
 
             notify('Bundling transaction...', 'info');
             let receipt = null;
@@ -332,7 +350,7 @@ export default function App() {
                 console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
                 
                 // Use fetch to query Particle Bundler directly since provider might not support eth_getUserOperationReceipt
-                const bundlerUrl = `https://api.particle.network/evm-chain/rpc?chainId=42161&projectUuid=${import.meta.env.VITE_PARTICLE_PROJECT_ID}&projectKey=${import.meta.env.VITE_PARTICLE_CLIENT_KEY}`;
+                const bundlerUrl = `https://bundler.particle.network?chainId=42161&projectUuid=${import.meta.env.VITE_PARTICLE_PROJECT_ID}&projectKey=${import.meta.env.VITE_PARTICLE_CLIENT_KEY}`;
                 const rpcRes = await fetch(bundlerUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -362,12 +380,20 @@ export default function App() {
               }
             }
 
-            setIsProcessing(false);
+            // Instant credit already processed
+
           } else {
             let finalAmount = Math.floor(Math.min(amount, actualTransferBal) * 1000000) / 1000000;
             finalTx.data = usdcInterface.encodeFunctionData("transfer", [PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6)]);
             const userOpHash = await saInstance.sendTransaction({ tx: finalTx } as any);
             
+            console.log(`[TopUp] UserOp Hash: ${userOpHash}`);
+            const credited = await triggerInstantCredit(userOpHash, finalAmount);
+            if (credited) {
+              setIsProcessing(false);
+              skipFinalSync = true;
+            }
+
             notify('Bundling transaction...', 'info');
             let receipt = null;
             let pollingAttempts = 0;
@@ -376,7 +402,7 @@ export default function App() {
                 console.log(`[TopUp] Polling for UserOp receipt: ${userOpHash}`);
                 
                 // Use fetch to query Particle Bundler directly since provider might not support eth_getUserOperationReceipt
-                const bundlerUrl = `https://api.particle.network/evm-chain/rpc?chainId=42161&projectUuid=&projectKey=`;
+                const bundlerUrl = `https://bundler.particle.network?chainId=42161&projectUuid=${import.meta.env.VITE_PARTICLE_PROJECT_ID}&projectKey=${import.meta.env.VITE_PARTICLE_CLIENT_KEY}`;
                 const rpcRes = await fetch(bundlerUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -406,7 +432,8 @@ export default function App() {
               }
             }
 
-            setIsProcessing(false);
+            // Instant credit already processed
+
           }
         } else {
         const browserProvider = new ethers.BrowserProvider(provider as any);
@@ -432,20 +459,11 @@ export default function App() {
           const tx = await usdcContract.transfer(PRIMARY_WALLET, ethers.parseUnits(finalAmount.toFixed(6), 6));
           // tx is the TransactionResponse, it has the hash immediately
           txHash = tx.hash;
-          notify('Transaction sent! Triggering instant credit...', 'info');
+          notify('Transaction signed! Applying instant credit...', 'info');
 
-          // INSTANT CREDIT: Call backend immediately
-          const { data: { session: authSession } } = await supabase.auth.getSession();
-          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/game-engine`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authSession?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify({ action: 'DEPOSIT', payload: { userId: userInfo.uuid, txHash, amount: finalAmount } })
-          });
-          setTimeout(fetchUserData, 1000);
-          setIsProcessing(false); // RELEASE UI IMMEDIATELY
+          await triggerInstantCredit(txHash, finalAmount);
+          setIsProcessing(false); // RELEASE UI
+          skipFinalSync = true;
         } catch (txErr: any) {
           if (txErr.message?.toLowerCase().includes('estimategas') || txErr.code === 'INSUFFICIENT_FUNDS') {
             throw new Error(`Gas estimation failed. This standard wallet requires ETH to pay for gas. Please use a Smart Account for a gassless experience.`);
@@ -453,7 +471,7 @@ export default function App() {
         }
       }
 
-      if (txHash) {
+      if (txHash && !skipFinalSync) {
         setSyncingTxHash(txHash);
         notify('Transaction sent! Finalizing deposit...', 'info');
         

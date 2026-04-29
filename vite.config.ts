@@ -4,6 +4,8 @@ import path from 'path';
 import fs from 'fs';
 import {defineConfig, loadEnv} from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
+import topLevelAwait from "vite-plugin-top-level-await";
+import wasm from "vite-plugin-wasm";
 
 // Custom plugin to serve the Particle Network WASM file correctly.
 // When Vite pre-bundles @particle-network/thresh-sig, the WASM fetch URL
@@ -37,6 +39,8 @@ export default defineConfig(({mode}) => {
       serveParticleWasm(),
       react(), 
       tailwindcss(),
+      wasm(),
+      topLevelAwait(),
       nodePolyfills({
         include: ['buffer', 'process', 'util', 'stream', 'events'],
         globals: {
@@ -59,6 +63,14 @@ export default defineConfig(({mode}) => {
     },
     build: {
       target: 'esnext',
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            particle: ['@particle-network/aa', '@particle-network/auth-core'],
+            antd: ['antd', '@ant-design/icons'],
+          },
+        },
+      },
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
