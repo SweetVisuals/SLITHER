@@ -56,6 +56,10 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        // The AA SDK does `import EventEmitter from "events"` (default import),
+        // but the `events` polyfill only provides named exports.
+        // This shim re-exports EventEmitter as both default and named.
+        'events': path.resolve(__dirname, 'src/shims/events.ts'),
         '@particle-network/auth-core': path.resolve(__dirname, 'node_modules/@particle-network/auth-core'),
         '@particle-network/aa': path.resolve(__dirname, 'node_modules/@particle-network/aa'),
         '@particle-network/auth-core-modal': path.resolve(__dirname, 'node_modules/@particle-network/auth-core-modal'),
