@@ -235,7 +235,7 @@ export default function App() {
 
     let txHash = '';
     let skipFinalSync = false;
-    const tokenSymbol = tokenAddress.toLowerCase() === USDC_E_ADDRESS.toLowerCase() ? 'USDC.e' : 'USDC';
+    const tokenSymbol = tokenAddress?.toLowerCase() === USDC_E_ADDRESS.toLowerCase() ? 'USDC.e' : 'USDC';
     try {
       notify(`Initiating deposit of ${amount.toFixed(2)} ${tokenSymbol} from ${targetType}...`, 'info');
 
@@ -251,8 +251,8 @@ export default function App() {
 
       if (isSA && (!currentActiveAddr || targetAddr?.toLowerCase() !== currentActiveAddr.toLowerCase())) {
         notify(`Switching to ${targetType} node...`, 'info');
-        const targetVersion = targetType.toLowerCase().includes('v1') ? '1.0.0' : '2.0.0';
-        const targetName = targetType.toLowerCase().includes('biconomy') ? 'BICONOMY' : 'SIMPLE';
+        const targetVersion = targetType?.toLowerCase().includes('v1') ? '1.0.0' : '2.0.0';
+        const targetName = targetType?.toLowerCase().includes('biconomy') ? 'BICONOMY' : 'SIMPLE';
 
         const forcedProvider = new Proxy(provider as any, {
           get(target, prop, receiver) {
@@ -777,7 +777,7 @@ const fetchUserData = useCallback(async (forcedAddressInput?: string | any, retr
 
       const bal = balData.total;
       let type = 'EOA/External';
-      const isTreasury = addr.toLowerCase() === PRIMARY_WALLET.toLowerCase();
+      const isTreasury = addr?.toLowerCase() === PRIMARY_WALLET?.toLowerCase();
 
       if (isTreasury) {
         type = 'House Treasury';
@@ -855,7 +855,7 @@ const fetchUserData = useCallback(async (forcedAddressInput?: string | any, retr
 
     // If we have a Biconomy address, it MUST be the primary Operator Node
     if (biconomyAddr && biconomyAddr.length > 20) {
-      if (userAddress.toLowerCase() !== biconomyAddr) {
+      if (userAddress?.toLowerCase() !== biconomyAddr) {
         console.log('[Diagnostic] Forcing primary Biconomy node:', biconomyAddr);
         setUserAddress(biconomyAddr);
       }
