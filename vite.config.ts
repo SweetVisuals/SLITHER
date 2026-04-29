@@ -36,11 +36,6 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, process.cwd(), '');
   return {
     plugins: [
-      serveParticleWasm(),
-      react(), 
-      tailwindcss(),
-      topLevelAwait(),
-      wasm(),
       nodePolyfills({
         include: ['buffer', 'process', 'util', 'stream', 'events'],
         globals: {
@@ -49,10 +44,15 @@ export default defineConfig(({mode}) => {
           process: true,
         },
       }),
+      serveParticleWasm(),
+      react(), 
+      tailwindcss(),
+      topLevelAwait(),
+      wasm(),
     ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'global': 'window',
+      'global': 'globalThis',
       'process.env': '{}',
     },
     resolve: {
@@ -60,6 +60,9 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
         '@particle-network/auth-core': path.resolve(__dirname, 'node_modules/@particle-network/auth-core'),
         '@particle-network/aa': path.resolve(__dirname, 'node_modules/@particle-network/aa'),
+        '@particle-network/auth-core-modal': path.resolve(__dirname, 'node_modules/@particle-network/auth-core-modal'),
+        '@particle-network/wallet': path.resolve(__dirname, 'node_modules/@particle-network/wallet'),
+        '@particle-network/chains': path.resolve(__dirname, 'node_modules/@particle-network/chains'),
       },
     },
     optimizeDeps: {
@@ -75,7 +78,7 @@ export default defineConfig(({mode}) => {
       ],
     },
     build: {
-      target: 'esnext',
+      target: 'es2020',
       rollupOptions: {
         output: {
           manualChunks: {

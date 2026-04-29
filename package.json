@@ -36,6 +36,7 @@
     "react-dom": "^18.3.1",
     "stream-browserify": "^3.0.0",
     "util": "^0.12.5",
+    "viem": "^2.47.12",
     "vite": "^6.2.0",
     "vite-plugin-node-polyfills": "^0.26.0"
   },
