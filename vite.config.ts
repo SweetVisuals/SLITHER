@@ -58,6 +58,8 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        '@particle-network/auth-core': path.resolve(__dirname, 'node_modules/@particle-network/auth-core'),
+        '@particle-network/aa': path.resolve(__dirname, 'node_modules/@particle-network/aa'),
       },
     },
     optimizeDeps: {
@@ -77,7 +79,6 @@ export default defineConfig(({mode}) => {
       rollupOptions: {
         output: {
           manualChunks: {
-            particle: ['@particle-network/aa', '@particle-network/auth-core'],
             antd: ['antd', '@ant-design/icons'],
           },
         },

@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import { ethers } from 'ethers';
 import { useConnect, useAuthCore, useEthereum } from '@particle-network/auth-core-modal';
-import { SmartAccount } from '@particle-network/aa';
+// SmartAccount will be loaded dynamically to avoid inheritance issues
 import { ArbitrumOne } from '@particle-network/chains';
 import { QRCodeCanvas } from 'qrcode.react';
 import { supabase } from './lib/supabase';
@@ -120,6 +120,7 @@ export default function App() {
           }
         });
 
+        const { SmartAccount } = await import('@particle-network/aa');
         const smartAccount = new SmartAccount(forcedProvider as any, {
           projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID || '3a913b51-6884-4638-bd23-fa0d728c7975',
           clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY || 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
@@ -267,6 +268,7 @@ export default function App() {
           }
         });
 
+        const { SmartAccount } = await import('@particle-network/aa');
         saInstance = new SmartAccount(forcedProvider as any, {
           projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID || '3a913b51-6884-4638-bd23-fa0d728c7975',
           clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY || 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
@@ -961,6 +963,7 @@ useEffect(() => {
               }
             });
 
+            const { SmartAccount } = await import('@particle-network/aa');
             const sa = new SmartAccount(forcedProvider as any, {
               projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID || '3a913b51-6884-4638-bd23-fa0d728c7975',
               clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY || 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
