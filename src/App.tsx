@@ -187,7 +187,7 @@ export default function App() {
         console.log('[TopUp] Instant credit response:', data);
         if (data.success) {
           setBalance(data.newBalance);
-          notify(`Instant credit applied: $${amt.toFixed(2)} added!`, 'success');
+          notify(`Credit Added: $${amt.toFixed(2)}`, 'success');
           return true;
         }
         await fetchUserData();
