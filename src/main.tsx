@@ -1,15 +1,5 @@
-import { Buffer } from 'buffer';
-(window as any).Buffer = Buffer;
-import process from 'process';
-(window as any).process = process;
-import { EventEmitter } from 'events';
-(window as any).EventEmitter = EventEmitter;
-(window as any).global = window;
-(window as any).globalObject = window;
-(window as any).process.env = {};
-(window as any).process.browser = true;
-(window as any).process.version = '';
-(window as any).process.nextTick = (cb: any) => setTimeout(cb, 0);
+import './polyfills';
+
 
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';

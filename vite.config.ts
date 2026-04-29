@@ -37,7 +37,7 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [
       nodePolyfills({
-        include: ['buffer', 'process', 'util', 'stream', 'events'],
+        include: ['buffer', 'process', 'util', 'stream'],
         globals: {
           Buffer: true,
           global: true,
@@ -52,6 +52,7 @@ export default defineConfig(({mode}) => {
     ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      'global': 'globalThis',
     },
     resolve: {
       alias: {

@@ -1,13 +1,18 @@
-// Custom events shim that ensures default export compatibility.
-// The @particle-network/aa SDK does `import EventEmitter from "events"` (default import)
-// but the standard `events` package only exports EventEmitter as a named export.
-// This shim bridges the gap by re-exporting EventEmitter as default.
+// Custom events shim that ensures default and named export compatibility.
+// The Particle AA SDK does `import EventEmitter from "events"` (default import)
+// but also some internal code does `class X extends events.EventEmitter`.
+// This shim handles both patterns by re-exporting EventEmitter correctly.
 
-// Use the actual events package path to avoid circular alias resolution
-// @ts-ignore - direct path import for polyfill
-import EventEmitterPkg from '../../node_modules/events/events.js';
+// Import the actual polyfill from node_modules directly
+import * as EventEmitterPkg from '../../node_modules/events/events.js';
 
-const EventEmitter = EventEmitterPkg.EventEmitter || EventEmitterPkg;
+// Extract the constructor function
+const EE = (EventEmitterPkg as any).EventEmitter || (EventEmitterPkg as any).default || EventEmitterPkg;
 
-export { EventEmitter };
-export default EventEmitter;
+// Ensure the constructor has a reference to itself as .EventEmitter
+if (EE && !EE.EventEmitter) {
+  EE.EventEmitter = EE;
+}
+
+export const EventEmitter = EE;
+export default EE;
