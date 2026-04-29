@@ -33,7 +33,7 @@ function serveParticleWasm() {
 }
 
 export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, '.', '');
+  const env = loadEnv(mode, process.cwd(), '');
   return {
     plugins: [
       serveParticleWasm(),

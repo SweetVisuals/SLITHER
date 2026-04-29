@@ -44,28 +44,25 @@ import './premium.css';
 
 type Page = 'HOME' | 'PLAYING' | 'PROFILE';
 
-// Global singleton flag - prevents WASM double-init crash
-let aaInitializing = false;
+// App component follows
 
 export default function App() {
-  const { connect, disconnect, connectionStatus, userInfo: connectUserInfo } = useConnect();
+  // Particle Auth & AA Hooks
+  const { connect: particleConnect, disconnect, connectionStatus, userInfo: connectUserInfo } = useConnect();
   const { provider: authProvider, userInfo: authUserInfo, logout } = useAuthCore();
   const { provider: ethProvider, address: ethAddress } = useEthereum();
+
+  // Unified Provider & User Info with lazy evaluation to avoid TDZ
+  const provider = useMemo(() => authProvider || ethProvider, [authProvider, ethProvider]);
   
-  const provider = authProvider || ethProvider;
-  
-  // Combine user info from both sources more robustly
-  const userInfo = {
-    ...(authUserInfo || {}),
-    ...(connectUserInfo || {}),
-    uuid: connectUserInfo?.uuid || authUserInfo?.uuid,
-    email: authUserInfo?.email || connectUserInfo?.email || (authUserInfo as any)?.thirdparty_user_info?.user_info?.email || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.email,
-    name: authUserInfo?.name || connectUserInfo?.name || (authUserInfo as any)?.thirdparty_user_info?.user_info?.name || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.name,
-    wallets: [
-      ...(connectUserInfo?.wallets || []),
-      ...(authUserInfo?.wallets || [])
-    ]
-  };
+  const userInfo = useMemo(() => {
+    return {
+      uuid: authUserInfo?.uuid || connectUserInfo?.uuid || (authUserInfo as any)?.thirdparty_user_info?.user_info?.uuid || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.uuid,
+      email: authUserInfo?.email || connectUserInfo?.email || (authUserInfo as any)?.thirdparty_user_info?.user_info?.email || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.email,
+      name: authUserInfo?.name || connectUserInfo?.name || (authUserInfo as any)?.thirdparty_user_info?.user_info?.name || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.name,
+      wallets: connectUserInfo?.wallets || []
+    };
+  }, [authUserInfo, connectUserInfo]);
 
   const [currentPage, setCurrentPage] = useState<Page>('HOME');
   const [selectedGame, setSelectedGame] = useState<'SLITHER'>('SLITHER');
@@ -89,16 +86,43 @@ export default function App() {
   const [topUpAmount, setTopUpAmount] = useState('');
   const [totalWalletBalance, setTotalWalletBalance] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
+
+  const { connect: particleConnect, disconnect, connectionStatus, userInfo: connectUserInfo } = useConnect();
+  const { provider: authCoreProvider, userInfo: authUserInfo, logout: authCoreLogout } = useAuthCore();
+  const { provider: ethProvider, address: ethAddress } = useEthereum();
+
+  // Use a ref for global initialization flag to prevent WASM double-init crashes
+  const aaInitializingRef = useRef(false);
+
+  const userInfo = useMemo(() => {
+    if (!authUserInfo && !connectUserInfo) return null;
+    return {
+      uuid: authUserInfo?.uuid || connectUserInfo?.uuid || (authUserInfo as any)?.thirdparty_user_info?.user_info?.uuid || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.uuid,
+      email: authUserInfo?.email || connectUserInfo?.email || (authUserInfo as any)?.thirdparty_user_info?.user_info?.email || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.email,
+      name: authUserInfo?.name || connectUserInfo?.name || (authUserInfo as any)?.thirdparty_user_info?.user_info?.name || (connectUserInfo as any)?.thirdparty_user_info?.user_info?.name,
+      wallets: connectUserInfo?.wallets || []
+    };
+  }, [authUserInfo, connectUserInfo]);
+
+  const provider = useMemo(() => authCoreProvider || ethProvider, [authCoreProvider, ethProvider]);
+  
+  const [balance, setBalance] = useState(0);
+  const [userAddress, setUserAddress] = useState<string | null>(null);
+  const [allWallets, setAllWallets] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
   const [syncingTxHash, setSyncingTxHash] = useState<string | null>(null);
   const [bestWallet, setBestWallet] = useState<{addr: string, bal: number, type: string, token: string} | null>(null);
   const smartAccountRef = useRef<SmartAccount | null>(null);
 
   // Initialize SmartAccount once to avoid WASM re-init crashes
   useEffect(() => {
-    if (!provider || smartAccountRef.current || aaInitializing) return;
+    if (!provider || smartAccountRef.current || aaInitializingRef.current) return;
     
     const initAA = async () => {
-      aaInitializing = true;
+      if (!provider) return;
+      
+      console.log('[AA] Starting Smart Account initialization...');
+      aaInitializingRef.current = true;
       try {
         const forcedProvider = new Proxy(provider as any, {
           get(target, prop) {
@@ -113,9 +137,9 @@ export default function App() {
         });
 
         const smartAccount = new SmartAccount(forcedProvider as any, {
-          projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID,
-          clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY,
-          appId: import.meta.env.VITE_PARTICLE_APP_ID,
+          projectId: import.meta.env.VITE_PARTICLE_PROJECT_ID || '3a913b51-6884-4638-bd23-fa0d728c7975',
+          clientKey: import.meta.env.VITE_PARTICLE_CLIENT_KEY || 'cizt9y8vB1VHrGU4lACTDkZg09rkMwYRDi5RcgZZ',
+          appId: import.meta.env.VITE_PARTICLE_APP_ID || '8c38a8da-9800-4764-9007-76d512c5163e',
           aaOptions: {
             chainId: 42161,
             accountContracts: {
@@ -127,12 +151,38 @@ export default function App() {
         console.log('[AA] Smart Account initialized successfully');
       } catch (err) {
         console.error('[AA] Initialization error:', err);
-        aaInitializing = false; // Allow retry on error
+        aaInitializingRef.current = false; // Allow retry on error
       }
     };
     
     initAA();
   }, [provider]);
+
+  const handleLogout = async () => {
+    try {
+      await disconnect();
+      await authCoreLogout();
+      smartAccountRef.current = null;
+      aaInitializingRef.current = false;
+      setUserAddress(null);
+      setBalance(0);
+      setAllWallets([]);
+      setBestWallet(null);
+      await supabase.auth.signOut();
+      
+      setUserProfile(null);
+      setTreasuryBalance(0);
+      setEmailInput('');
+      setCurrentPage('HOME');
+      
+      notify('Session terminated successfully', 'success');
+    } catch (err) {
+      console.error('Logout error:', err);
+      notify('Failed to clear session fully', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
@@ -587,19 +637,6 @@ export default function App() {
     return email === 'ptnmgmt@gmail.com';
   }, [userInfo]);
   
-  const handleLogout = async () => {
-    try {
-      setIsProcessing(true);
-      await disconnect();
-      if (logout) await logout();
-      await supabase.auth.signOut();
-      
-      // Reset all user-related state
-      setUserAddress('');
-      setBalance(0);
-      setHighScore(0);
-      setTotalInjected(0);
-      setTotalSessions(0);
       setUserProfile(null);
       setTreasuryBalance(0);
       setEmailInput('');
@@ -1253,7 +1290,7 @@ export default function App() {
                 
                 <button 
                   disabled={isProcessing}
-                  onClick={() => connect({ email: emailInput })}
+                  onClick={() => particleConnect({ email: emailInput })}
                   className="w-full py-5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm uppercase transition-all rounded-2xl shadow-lg shadow-sky-500/20 active:scale-[0.98] disabled:opacity-50"
                 >
                   {isProcessing ? 'Authorizing...' : 'Authenticate Wallet'}
@@ -1266,7 +1303,7 @@ export default function App() {
                 </div>
 
                 <button 
-                  onClick={() => connect({ socialType: 'google' })}
+                  onClick={() => particleConnect({ socialType: 'google' })}
                   className="w-full py-5 bg-slate-800/50 hover:bg-slate-800 text-white font-black text-sm uppercase transition-all rounded-2xl flex items-center justify-center gap-3"
                 >
                   <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="G" />
@@ -1333,7 +1370,7 @@ export default function App() {
              </div>
            ) : (
              <button 
-               onClick={() => connect()}
+               onClick={() => particleConnect()}
                disabled={isProcessing}
                className="px-6 md:px-8 py-3 md:py-4 bg-sky-500 text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-sky-400 transition-all shadow-lg shadow-sky-500/20 active:scale-95 border-none"
              >
@@ -2032,7 +2069,7 @@ export default function App() {
                         
                         if (!targetAddress) {
                           notify('Opening wallet selector...', 'info');
-                          await connect();
+                          await particleConnect();
                           return; // Let them click again once connected
                         }
 
