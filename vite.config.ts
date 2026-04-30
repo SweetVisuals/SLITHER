@@ -57,8 +57,10 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-        // Robust events shim for Particle SDK
-        'events': path.resolve(__dirname, 'src/shims/events.ts'),
+        'events': 'events',
+        'util': 'util',
+        'stream': 'stream-browserify',
+        'process': 'process/browser',
         '@particle-network/auth-core': path.resolve(__dirname, 'node_modules/@particle-network/auth-core'),
         '@particle-network/aa': path.resolve(__dirname, 'node_modules/@particle-network/aa'),
         '@particle-network/auth-core-modal': path.resolve(__dirname, 'node_modules/@particle-network/auth-core-modal'),
@@ -77,7 +79,9 @@ export default defineConfig(({mode}) => {
         '@particle-network/aa',
         '@particle-network/auth-core-modal',
         '@particle-network/wallet',
-        '@particle-network/chains'
+        '@particle-network/chains',
+        'viem',
+        'abitype'
       ]
     },
     build: {
