@@ -57,7 +57,8 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-        // Particle SDK packages are pinned to node_modules to prevent duplicate resolution
+        // Robust events shim for Particle SDK
+        'events': path.resolve(__dirname, 'src/shims/events.ts'),
         '@particle-network/auth-core': path.resolve(__dirname, 'node_modules/@particle-network/auth-core'),
         '@particle-network/aa': path.resolve(__dirname, 'node_modules/@particle-network/aa'),
         '@particle-network/auth-core-modal': path.resolve(__dirname, 'node_modules/@particle-network/auth-core-modal'),
@@ -69,12 +70,15 @@ export default defineConfig(({mode}) => {
       include: [
         'buffer',
         'process',
-        '@particle-network/aa',
-        '@particle-network/auth-core-modal',
-        '@particle-network/chains',
         '@particle-network/thresh-sig',
         'ethers'
       ],
+      exclude: [
+        '@particle-network/aa',
+        '@particle-network/auth-core-modal',
+        '@particle-network/wallet',
+        '@particle-network/chains'
+      ]
     },
     build: {
       target: 'es2020',
