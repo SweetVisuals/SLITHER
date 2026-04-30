@@ -37,7 +37,7 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [
       nodePolyfills({
-        include: ['buffer', 'process', 'util', 'stream'],
+        include: ['buffer', 'process', 'util', 'stream', 'events'],
         globals: {
           Buffer: true,
           global: true,
@@ -57,10 +57,7 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-        // The AA SDK does `import EventEmitter from "events"` (default import),
-        // but the `events` polyfill only provides named exports.
-        // This shim re-exports EventEmitter as both default and named.
-        'events': path.resolve(__dirname, 'src/shims/events.ts'),
+        // Particle SDK packages are pinned to node_modules to prevent duplicate resolution
         '@particle-network/auth-core': path.resolve(__dirname, 'node_modules/@particle-network/auth-core'),
         '@particle-network/aa': path.resolve(__dirname, 'node_modules/@particle-network/aa'),
         '@particle-network/auth-core-modal': path.resolve(__dirname, 'node_modules/@particle-network/auth-core-modal'),
@@ -72,7 +69,6 @@ export default defineConfig(({mode}) => {
       include: [
         'buffer',
         'process',
-        'events',
         '@particle-network/aa',
         '@particle-network/auth-core-modal',
         '@particle-network/chains',
